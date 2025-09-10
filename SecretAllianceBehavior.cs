@@ -488,13 +488,14 @@ namespace SecretAlliances
                 // Small mutual benefit representing trade coordination
                 int netBenefit = transferAmount / 4; // Small net positive
                 
+                // Safe gold transfer - clan benefits from trade coordination 
                 if (initiator.Gold >= netBenefit)
                 {
-                    GiveGoldAction.ApplyBetweenCharacters(null, initiator.Leader, netBenefit, false);
+                    initiator.AddGold(netBenefit);
                 }
                 if (target.Gold >= netBenefit)
                 {
-                    GiveGoldAction.ApplyBetweenCharacters(null, target.Leader, netBenefit, false);
+                    target.AddGold(netBenefit);
                 }
             }
         }
