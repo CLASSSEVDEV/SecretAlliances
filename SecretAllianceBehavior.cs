@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Claims;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.GameComponents;
@@ -71,6 +70,15 @@ namespace SecretAlliances
             foreach (var alliance in relevantAlliances)
             {
                 EvaluateAlliance(alliance);
+
+                // Process trade pact daily effects
+                ProcessTradePactEffects(alliance);
+
+                // Age cooldown
+                if (alliance.CooldownDays > 0)
+                {
+                    alliance.CooldownDays--;
+                }
             }
 
             // Check for new alliance opportunities
@@ -141,6 +149,10 @@ namespace SecretAlliances
                 if (traits.Generosity > 0) secrecyLoss += traits.Generosity * 0.0005f; // Generous leaders may talk too much
             }
 
+            // Pacts increase secrecy decay
+            if (alliance.TradePact) secrecyLoss += 0.0005f;
+            if (alliance.MilitaryPact) secrecyLoss += 0.001f;
+
             alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
         }
 
@@ -184,6 +196,12 @@ namespace SecretAlliances
             float politicalPressure = CalculatePoliticalPressure(initiator, target);
             strengthGain *= (1f + politicalPressure * 0.2f);
 
+            // Military pact increases strength growth
+            if (alliance.MilitaryPact)
+            {
+                strengthGain *= 1.2f;
+            }
+
             alliance.Strength = MathF.Min(1f, alliance.Strength + strengthGain);
         }
 
@@ -214,6 +232,10 @@ namespace SecretAlliances
                 leakChance *= MathF.Max(0.5f, 1f - (alliance.DaysWithoutLeak - 30) * 0.01f);
             }
 
+            // Pacts increase leak risk
+            if (alliance.TradePact) leakChance *= 1.1f;
+            if (alliance.MilitaryPact) leakChance *= 1.15f;
+
             if (_rng.NextDouble() < leakChance)
             {
                 ProcessLeak(alliance, potentialInformants);
@@ -241,7 +263,7 @@ namespace SecretAlliances
             {
                 var intel = new AllianceIntelligence
                 {
-                    AllianceId = alliance.InitiatorClanId, // Using as unique identifier
+                    AllianceId = alliance.UniqueId, // Using unique identifier
                     InformerHeroId = informant.Id,
                     ReliabilityScore = CalculateInformerReliability(informant),
                     DaysOld = 0,
@@ -330,6 +352,12 @@ namespace SecretAlliances
             if (HasRecentMilitaryLosses(initiator))
             {
                 baseChance *= 1.3f;
+            }
+
+            // Military pact gives coup bonus
+            if (alliance.MilitaryPact)
+            {
+                baseChance *= 1.15f;
             }
 
             return MathF.Min(0.3f, baseChance); // Cap at 30%
@@ -441,6 +469,36 @@ namespace SecretAlliances
         }
 
         // Helper Methods
+        private void ProcessTradePactEffects(SecretAllianceRecord alliance)
+        {
+            if (!alliance.TradePact) return;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator?.Leader == null || target?.Leader == null) return;
+
+            // Calculate trade benefit based on economic incentive and trust
+            float baseTransfer = (alliance.EconomicIncentive * alliance.TrustLevel * 100f);
+            int transferAmount = (int)MathF.Max(50f, MathF.Min(150f, baseTransfer));
+
+            // Bilateral transfer - both clans benefit
+            if (initiator.Gold >= transferAmount && target.Gold >= transferAmount)
+            {
+                // Small mutual benefit representing trade coordination
+                int netBenefit = transferAmount / 4; // Small net positive
+                
+                if (initiator.Gold >= netBenefit)
+                {
+                    GiveGoldAction.ApplyBetweenCharacters(null, initiator.Leader, netBenefit, false);
+                }
+                if (target.Gold >= netBenefit)
+                {
+                    GiveGoldAction.ApplyBetweenCharacters(null, target.Leader, netBenefit, false);
+                }
+            }
+        }
+
         private bool AreClansInConflictingSituations(Clan clan1, Clan clan2)
         {
             if (clan1.Kingdom == null || clan2.Kingdom == null) return false;
@@ -1119,6 +1177,7 @@ namespace SecretAlliances
 
             var alliance = new SecretAllianceRecord
             {
+                UniqueId = MBGUID.NewGuid(),
                 InitiatorClanId = initiator.Id,
                 TargetClanId = target.Id,
                 Secrecy = initialSecrecy,
@@ -1126,6 +1185,10 @@ namespace SecretAlliances
                 BribeAmount = bribe,
                 IsActive = true,
                 CreatedGameDay = CampaignTime.Now.GetDayOfYear,
+                LastInteractionDay = CampaignTime.Now.GetDayOfYear,
+                CooldownDays = 5,
+                TradePact = false,
+                MilitaryPact = false,
                 TrustLevel = 0.5f,
                 RiskTolerance = _rng.NextFloat(),
                 EconomicIncentive = CalculateMutualBenefit(initiator, target),
@@ -1163,6 +1226,77 @@ namespace SecretAlliances
         public List<AllianceIntelligence> GetIntelligence()
         {
             return _intelligence.ToList();
+        }
+
+        // New public methods for pact management
+        public bool TrySetTradePact(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
+                return false;
+
+            alliance.TradePact = true;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+            alliance.CooldownDays = 5;
+            alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.05f);
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.02f);
+
+            return true;
+        }
+
+        public bool TrySetMilitaryPact(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
+                return false;
+
+            alliance.MilitaryPact = true;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+            alliance.CooldownDays = 7;
+            alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.08f);
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.05f);
+
+            return true;
+        }
+
+        public bool TryDissolveAlliance(Clan clanA, Clan clanB, bool blamePlayer)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive)
+                return false;
+
+            alliance.IsActive = false;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator?.Leader != null && target?.Leader != null)
+            {
+                if (blamePlayer)
+                {
+                    // Player gets blamed more
+                    if (Clan.PlayerClan == initiator)
+                    {
+                        ChangeRelationAction.ApplyPlayerRelation(target.Leader, -15, true, false);
+                        ChangeClanInfluenceAction.Apply(initiator, -20f);
+                    }
+                    else if (Clan.PlayerClan == target)
+                    {
+                        ChangeRelationAction.ApplyPlayerRelation(initiator.Leader, -15, true, false);
+                        ChangeClanInfluenceAction.Apply(target, -20f);
+                    }
+                }
+                else
+                {
+                    // Mutual smaller hit
+                    ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, target.Leader, -5);
+                    ChangeClanInfluenceAction.Apply(initiator, -10f);
+                    ChangeClanInfluenceAction.Apply(target, -10f);
+                }
+            }
+
+            return true;
         }
     }
 }

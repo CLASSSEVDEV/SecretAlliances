@@ -71,12 +71,17 @@ namespace SecretAlliances
 
                 if (initiator == null || target == null) continue;
 
-                info.Add($"Alliance: {initiator.Name} <-> {target.Name}");
+                info.Add($"Alliance: {initiator.Name} <-> {target.Name} (ID: {alliance.UniqueId})");
                 info.Add($"  Strength: {alliance.Strength:F2} | Secrecy: {alliance.Secrecy:F2} | Trust: {alliance.TrustLevel:F2}");
                 info.Add($"  Bribe: {alliance.BribeAmount:F0} | Days Active: {CampaignTime.Now.GetDayOfYear - alliance.CreatedGameDay}");
                 info.Add($"  Political Pressure: {alliance.PoliticalPressure:F2} | Military Advantage: {alliance.MilitaryAdvantage:F2}");
                 info.Add($"  Common Enemies: {alliance.HasCommonEnemies} | Coup Attempted: {alliance.CoupAttempted}");
                 info.Add($"  Successful Ops: {alliance.SuccessfulOperations} | Leak Attempts: {alliance.LeakAttempts}");
+                info.Add($"  Trade Pact: {alliance.TradePact} | Military Pact: {alliance.MilitaryPact}");
+                info.Add($"  Last Interaction: Day {alliance.LastInteractionDay} | Cooldown: {alliance.CooldownDays} days");
+
+                if (alliance.IsOnCooldown())
+                    info.Add("  STATUS: ON COOLDOWN");
 
                 if (alliance.BetrayalRevealed)
                     info.Add("  STATUS: EXPOSED!");
@@ -156,6 +161,15 @@ namespace SecretAlliances
 
                     if (alliance.BribeAmount > 0)
                         info.Add($"  Financial Incentive: {alliance.BribeAmount:F0} denars");
+
+                    if (alliance.TradePact)
+                        info.Add($"  Trade Coordination: Active");
+
+                    if (alliance.MilitaryPact)
+                        info.Add($"  Military Coordination: Active");
+
+                    if (alliance.IsOnCooldown())
+                        info.Add($"  Status: Cooldown ({alliance.CooldownDays} days remaining)");
 
                     if (alliance.CoupAttempted)
                         info.Add($"  WARNING: Coup previously attempted!");

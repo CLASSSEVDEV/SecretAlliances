@@ -16,6 +16,7 @@ namespace SecretAlliances
         private int _currentAllianceEvaluationScore = 0;
         private int _currentBribeReceptivity = 0;
         private int _currentBribeAmount = 0;
+        private bool _lastPactResult = false;
 
         protected override void OnGameStart(Game game, IGameStarter starterObject)
         {
@@ -26,8 +27,6 @@ namespace SecretAlliances
                 // Add the campaign behavior that manages the alliances
                 _allianceBehavior = new SecretAllianceBehavior();
                 campaignStarter.AddBehavior(_allianceBehavior);
-
-                campaignStarter.AddBehavior(new SecretAllianceBehavior());
 
                 // Register dialog lines for secret alliance system
                 AddDialogs(campaignStarter);
@@ -47,6 +46,9 @@ namespace SecretAlliances
                 "sa_response_consider",
                 "{=SA_PlayerOffer}I have a discreet proposal that could benefit both our clans...",
                 CanOfferSecretAlliance,
+                null,
+                100,
+                SecretAllianceClickableCondition,
                 null);
 
             starter.AddDialogLine(
@@ -105,7 +107,7 @@ namespace SecretAlliances
                 "hero_main_options",
                 "{=SA_AllianceReject}The risks are too great...",
                 () => !ShouldAcceptAlliance(),
-                null);
+                () => ResetConversationState());
 
             // --- BRIBE BRANCH ---
             starter.AddDialogLine(
@@ -154,7 +156,7 @@ namespace SecretAlliances
                 "hero_main_options",
                 "{=SA_BribeReject}My loyalty is worth more than gold...",
                 () => !ShouldAcceptBribe(),
-                null);
+                () => ResetConversationState());
 
             // --- INTELLIGENCE ---
             starter.AddPlayerLine(
@@ -175,6 +177,92 @@ namespace SecretAlliances
                 "{=SA_InfoResponse}Rumors are dangerous things...",
                 () => true,
                 ShareIntelligence);
+
+            // --- ALLIANCE MANAGEMENT (for existing allies) ---
+            starter.AddPlayerLine(
+                "sa_deepen_pact",
+                "hero_main_options",
+                "sa_pact_options",
+                "{=SA_DeepenPact}Perhaps we should deepen our arrangement...",
+                CanDeepenPact,
+                null,
+                100);
+
+            starter.AddPlayerLine(
+                "sa_dissolve_alliance",
+                "hero_main_options",
+                "sa_dissolve_confirm",
+                "{=SA_DissolveAlliance}I believe it's time to end our arrangement.",
+                CanDissolveAlliance,
+                null,
+                100);
+
+            // --- PACT OPTIONS ---
+            starter.AddPlayerLine(
+                "sa_trade_pact",
+                "sa_pact_options",
+                "sa_pact_result",
+                "{=SA_TradePact}We should coordinate our trade efforts.",
+                () => true,
+                () => TrySetTradePact());
+
+            starter.AddPlayerLine(
+                "sa_military_pact",
+                "sa_pact_options",
+                "sa_pact_result",
+                "{=SA_MilitaryPact}Our military forces should work together.",
+                () => true,
+                () => TrySetMilitaryPact());
+
+            starter.AddPlayerLine(
+                "sa_pact_nevermind",
+                "sa_pact_options",
+                "hero_main_options",
+                "{=SA_PactNevermind}On second thought, our current arrangement is sufficient.",
+                () => true,
+                null);
+
+            // --- PACT RESULTS ---
+            starter.AddDialogLine(
+                "sa_pact_success",
+                "sa_pact_result",
+                "hero_main_options",
+                "{=SA_PactSuccess}Agreed. This coordination will benefit us both.",
+                () => _lastPactResult,
+                () => ResetConversationState());
+
+            starter.AddDialogLine(
+                "sa_pact_failure",
+                "sa_pact_result",
+                "hero_main_options",
+                "{=SA_PactFailure}Perhaps we should wait before making such arrangements.",
+                () => !_lastPactResult,
+                () => ResetConversationState());
+
+            // --- DISSOLUTION ---
+            starter.AddDialogLine(
+                "sa_dissolve_confirm",
+                "sa_dissolve_confirm",
+                "sa_dissolve_final",
+                "{=SA_DissolveConfirm}If that is your wish...",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_dissolve_yes",
+                "sa_dissolve_final",
+                "hero_main_options",
+                "{=SA_DissolveYes}Yes, it's for the best.",
+                () => true,
+                () => DissolveAlliance());
+
+            starter.AddPlayerLine(
+                "sa_dissolve_no",
+                "sa_dissolve_final",
+                "hero_main_options",
+                "{=SA_DissolveNo}Perhaps I spoke hastily.",
+                () => true,
+                () => ResetConversationState());
         }
 
 
@@ -265,7 +353,7 @@ namespace SecretAlliances
         {
             // Check stored evaluation score
             
-            return _currentAllianceEvaluationScore >= 60;
+            return _currentAllianceEvaluationScore >= 65; // Increased from 60
         }
 
         private bool ShouldAcceptBribe()
@@ -306,6 +394,17 @@ namespace SecretAlliances
             // AFTER
             // AFTER (This is the correct method for the API)
             ChangeClanInfluenceAction.Apply(playerClan, -10f);
+
+            // Reset conversation state
+            ResetConversationState();
+        }
+
+        private void ResetConversationState()
+        {
+            _currentAllianceEvaluationScore = 0;
+            _currentBribeReceptivity = 0;
+            _currentBribeAmount = 0;
+            _lastPactResult = false;
         }
 
         private void AcceptBribe()
@@ -335,6 +434,9 @@ namespace SecretAlliances
             {
                 targetHero.AddSkillXp(DefaultSkills.Roguery, 100); // Becomes more roguish
             }
+
+            // Reset conversation state
+            ResetConversationState();
         }
 
         private void ShareIntelligence()
@@ -374,13 +476,13 @@ namespace SecretAlliances
             if (targetClan.Leader != null)
             {
                 int relation = targetClan.Leader.GetRelation(Hero.MainHero);
-                score += relation / 2; // Each relation point = 0.5% acceptance
+                score += relation / 3; // Each relation point = 0.33% acceptance (reduced from 0.5%)
             }
 
             // Economic factors
             if (playerClan.Gold > targetClan.Gold * 1.5f)
             {
-                score += 10; // Player is wealthy
+                score += 8; // Player is wealthy (reduced from 10)
             }
             else if (playerClan.Gold < targetClan.Gold * 0.5f)
             {
@@ -391,7 +493,7 @@ namespace SecretAlliances
             float strengthRatio = playerClan.TotalStrength / System.Math.Max(1f, targetClan.TotalStrength);
             if (strengthRatio > 1.5f)
             {
-                score += 15; // Player is much stronger
+                score += 12; // Player is much stronger (reduced from 15)
             }
             else if (strengthRatio < 0.5f)
             {
@@ -490,6 +592,50 @@ namespace SecretAlliances
             receptivity += MBRandom.RandomInt(-10, 10);
 
             return System.Math.Max(0, System.Math.Min(80, receptivity));
+        }
+
+        // New dialog conditions and consequences
+        private bool CanDeepenPact()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && !alliance.IsOnCooldown();
+        }
+
+        private bool CanDissolveAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive;
+        }
+
+        private void TrySetTradePact()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            _lastPactResult = _allianceBehavior?.TrySetTradePact(Clan.PlayerClan, targetHero.Clan) ?? false;
+        }
+
+        private void TrySetMilitaryPact()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            _lastPactResult = _allianceBehavior?.TrySetMilitaryPact(Clan.PlayerClan, targetHero.Clan) ?? false;
+        }
+
+        private void DissolveAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            _allianceBehavior?.TryDissolveAlliance(Clan.PlayerClan, targetHero.Clan, true);
+            ResetConversationState();
         }
     }
 }
