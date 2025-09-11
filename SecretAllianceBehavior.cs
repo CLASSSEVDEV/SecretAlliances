@@ -134,9 +134,9 @@ namespace SecretAlliances
             // Factors that decrease secrecy
             float secrecyLoss = 0f;
 
-            // More heroes in clans = harder to keep secret
+            // More heroes in clans = harder to keep secret (bounded)
             int totalHeroes = (initiator.Heroes?.Count ?? 0) + (target.Heroes?.Count ?? 0);
-            secrecyLoss += totalHeroes * 0.0005f;
+            secrecyLoss += MathF.Min(0.002f, totalHeroes * 0.0005f); // Cap hero effect
 
             // If clans are at war with each other's allies, secrecy decreases faster
             if (AreClansInConflictingSituations(initiator, target))
@@ -144,32 +144,29 @@ namespace SecretAlliances
                 secrecyLoss += 0.003f;
             }
 
-            // Distance between clan settlements affects secrecy maintenance
+            // Distance between clan settlements affects secrecy maintenance (bounded)
             float distance = GetClanDistance(initiator, target);
             if (distance > 100f) // Long distance makes coordination harder
             {
-                secrecyLoss += (distance - 100f) / 10000f;
+                secrecyLoss += MathF.Min(0.002f, (distance - 100f) / 10000f); // Cap distance effect
             }
 
-            // Leader personality affects secrecy maintenance
+            // Leader personality affects secrecy maintenance (bounded)
             if (initiator.Leader != null)
             {
                 // Calculating personality-based secrecy loss
                 var traits = initiator.Leader.GetHeroTraits();
-                if (traits.Honor > 0) secrecyLoss += traits.Honor * 0.001f; // Honorable leaders struggle with secrecy
-                if (traits.Generosity > 0) secrecyLoss += traits.Generosity * 0.0005f; // Generous leaders may talk too much
+                if (traits.Honor > 0) secrecyLoss += MathF.Min(0.001f, traits.Honor * 0.0005f); // Reduced and bounded
+                if (traits.Generosity > 0) secrecyLoss += MathF.Min(0.0005f, traits.Generosity * 0.0002f); // Reduced and bounded
             }
 
-            if (alliance.MilitaryPact)
-            {
-                secrecyLoss += 0.001f;
-            }
-
-            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
-
+            // Pact effects (combined to avoid duplication)
             if (alliance.TradePact) secrecyLoss += 0.0005f;
             if (alliance.MilitaryPact) secrecyLoss += 0.001f;
 
+            // Apply bounded secrecy loss
+            secrecyLoss = MathF.Min(0.01f, secrecyLoss); // Cap total daily secrecy loss to 1%
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
         }
 
         private void UpdateAllianceStrength(SecretAllianceRecord alliance)
@@ -177,52 +174,51 @@ namespace SecretAlliances
             var initiator = alliance.GetInitiatorClan();
             var target = alliance.GetTargetClan();
 
-            // Base growth
+            // Base growth with bounds
             float strengthGain = DAILY_STRENGTH_GROWTH;
 
-            // Factors that increase strength
+            // Factors that increase strength (all bounded to prevent runaway growth)
 
-            // Mutual benefit increases strength
-            float mutualBenefit = CalculateMutualBenefit(initiator, target);
-            strengthGain *= (1f + mutualBenefit);
+            // Mutual benefit increases strength (bounded)
+            float mutualBenefit = MathF.Min(1.5f, CalculateMutualBenefit(initiator, target));
+            strengthGain *= (1f + mutualBenefit * 0.5f); // Cap mutual benefit effect
 
-            // Trust level affects strength growth
-            strengthGain *= (0.5f + alliance.TrustLevel * 0.5f);
+            // Trust level affects strength growth (bounded)
+            float trustMultiplier = MathF.Min(1.5f, 0.5f + alliance.TrustLevel * 0.5f);
+            strengthGain *= trustMultiplier;
 
-            // Economic incentives boost strength
+            // Economic incentives boost strength (bounded)
             if (alliance.BribeAmount > 0)
             {
                 float bribeEffect = MathF.Min(0.5f, alliance.BribeAmount / 10000f);
                 strengthGain *= (1f + bribeEffect);
             }
 
-            // Common enemies strengthen alliance
+            // Common enemies strengthen alliance (bounded)
             if (alliance.HasCommonEnemies)
             {
-                strengthGain *= 1.3f;
+                strengthGain *= 1.2f; // Reduced from 1.3f
             }
 
-            // Recent successful operations boost strength
+            // Recent successful operations boost strength (bounded to prevent infinite growth)
             if (alliance.SuccessfulOperations > 0)
             {
-                strengthGain *= (1f + alliance.SuccessfulOperations * 0.1f);
+                float opsBonus = MathF.Min(0.5f, alliance.SuccessfulOperations * 0.05f); // Reduced multiplier
+                strengthGain *= (1f + opsBonus);
             }
 
+            // Military pact bonus (combined effect, no duplication)
             if (alliance.MilitaryPact)
             {
-                strengthGain *= 1.5f;
+                strengthGain *= 1.3f; // Single effect instead of two separate ones
             }
 
+            // Political pressure can drive clans together (bounded)
+            float politicalPressure = MathF.Min(1.0f, CalculatePoliticalPressure(initiator, target));
+            strengthGain *= (1f + politicalPressure * 0.1f); // Reduced multiplier
 
-            // Political pressure can drive clans together
-            float politicalPressure = CalculatePoliticalPressure(initiator, target);
-            strengthGain *= (1f + politicalPressure * 0.2f);
-
-            if (alliance.MilitaryPact)
-            {
-                strengthGain *= 1.2f;
-            }
-
+            // Cap daily strength gain to prevent excessive growth
+            strengthGain = MathF.Min(0.01f, strengthGain); // Max 1% strength gain per day
 
             alliance.Strength = MathF.Min(1f, alliance.Strength + strengthGain);
         }
@@ -1620,13 +1616,21 @@ namespace SecretAlliances
             var alliance = FindAlliance(clanA, clanB);
             if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
                 return false;
+            
+            // Check if alliance is strong enough for trade pact
+            if (alliance.Strength < 0.3f || alliance.Secrecy < 0.2f)
+                return false;
 
             alliance.TradePact = true;
             alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
             alliance.CooldownDays = 5;
             alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.05f);
             alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.02f);
+            
+            // Generate intelligence about the trade pact
+            GenerateTradePactIntelligence(alliance);
 
+            Debug.Print($"[Secret Alliances] Trade pact established between {clanA.Name} and {clanB.Name}");
             return true;
         }
 
@@ -1635,13 +1639,21 @@ namespace SecretAlliances
             var alliance = FindAlliance(clanA, clanB);
             if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
                 return false;
+            
+            // Military pacts require higher thresholds
+            if (alliance.Strength < 0.5f || alliance.TrustLevel < 0.6f)
+                return false;
 
             alliance.MilitaryPact = true;
             alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
             alliance.CooldownDays = 7;
             alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.08f);
             alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.05f);
+            
+            // Generate intelligence about the military pact
+            GenerateMilitaryPactIntelligence(alliance);
 
+            Debug.Print($"[Secret Alliances] Military pact established between {clanA.Name} and {clanB.Name}");
             return true;
         }
 
@@ -1700,11 +1712,32 @@ namespace SecretAlliances
 
             if (!relevantIntel.Any()) return false;
 
-            var intel = relevantIntel.First();
-            rumorSummary = $"There are whispers of secret dealings... (Reliability: {intel.ReliabilityScore:F1}, Age: {intel.DaysOld} days)";
+            // Select the most relevant intelligence based on reliability and recency
+            var intel = relevantIntel.OrderByDescending(i => i.ReliabilityScore * (1f - i.DaysOld / 45f)).First();
+            
+            // Generate category-specific rumor text
+            string rumorText = GetRumorTextByCategory(intel);
+            rumorSummary = $"{rumorText} (Reliability: {intel.ReliabilityScore:F1}, Age: {intel.DaysOld} days)";
 
             Debug.Print($"[Secret Alliances] Rumors shared by {hero.Name}: {rumorSummary}");
             return true;
+        }
+
+        private string GetRumorTextByCategory(AllianceIntelligence intel)
+        {
+            switch ((AllianceIntelType)intel.IntelCategory)
+            {
+                case AllianceIntelType.TradePactEvidence:
+                    return "I've heard whispers of secret trade arrangements between certain clans...";
+                case AllianceIntelType.MilitaryCoordination:
+                    return "There are rumors of clans coordinating their military movements in suspicious ways...";
+                case AllianceIntelType.SecretMeeting:
+                    return "Lords have been meeting in secret, away from prying eyes...";
+                case AllianceIntelType.BetrayalPlot:
+                    return "Dark whispers speak of treachery brewing among the noble houses...";
+                default:
+                    return "There are whispers of secret dealings among the nobles...";
+            }
         }
 
         // Helper predicates for UI/dialogue integration
@@ -1843,6 +1876,73 @@ namespace SecretAlliances
             
             alliance.LastOperationDay = CampaignTime.Now.GetDayOfYear;
             Debug.Print($"[Secret Alliances] New operation type {alliance.PendingOperationType} started for alliance {alliance.InitiatorClanId}-{alliance.TargetClanId}");
+        }
+
+        private void GenerateTradePactIntelligence(SecretAllianceRecord alliance)
+        {
+            // Generate intelligence when trade pacts are established
+            if (MBRandom.RandomFloat < 0.3f) // 30% chance to generate intelligence
+            {
+                var initiator = alliance.GetInitiatorClan();
+                var target = alliance.GetTargetClan();
+                
+                // Find potential informants from both clans
+                var potentialInformants = GetPotentialInformants(initiator, target, alliance);
+                
+                if (potentialInformants.Any())
+                {
+                    var informant = potentialInformants[MBRandom.RandomInt(potentialInformants.Count)];
+                    
+                    var intel = new AllianceIntelligence
+                    {
+                        AllianceId = alliance.UniqueId,
+                        InformerHeroId = informant.Id,
+                        ReliabilityScore = CalculateInformerReliability(informant) * 0.8f, // Trade pact intel is less reliable
+                        DaysOld = 0,
+                        IsConfirmed = false,
+                        SeverityLevel = 0.4f, // Moderate severity
+                        ClanAId = alliance.InitiatorClanId,
+                        ClanBId = alliance.TargetClanId,
+                        IntelCategory = (int)AllianceIntelType.TradePactEvidence
+                    };
+                    
+                    _intelligence.Add(intel);
+                    Debug.Print($"[Secret Alliances] Trade pact intelligence generated by {informant.Name}");
+                }
+            }
+        }
+
+        private void GenerateMilitaryPactIntelligence(SecretAllianceRecord alliance)
+        {
+            // Generate intelligence when military pacts are established
+            if (MBRandom.RandomFloat < 0.5f) // 50% chance to generate intelligence (higher than trade)
+            {
+                var initiator = alliance.GetInitiatorClan();
+                var target = alliance.GetTargetClan();
+                
+                var potentialInformants = GetPotentialInformants(initiator, target, alliance);
+                
+                if (potentialInformants.Any())
+                {
+                    var informant = potentialInformants[MBRandom.RandomInt(potentialInformants.Count)];
+                    
+                    var intel = new AllianceIntelligence
+                    {
+                        AllianceId = alliance.UniqueId,
+                        InformerHeroId = informant.Id,
+                        ReliabilityScore = CalculateInformerReliability(informant), // Military intel is more reliable
+                        DaysOld = 0,
+                        IsConfirmed = false,
+                        SeverityLevel = 0.7f, // High severity
+                        ClanAId = alliance.InitiatorClanId,
+                        ClanBId = alliance.TargetClanId,
+                        IntelCategory = (int)AllianceIntelType.MilitaryCoordination
+                    };
+                    
+                    _intelligence.Add(intel);
+                    Debug.Print($"[Secret Alliances] Military pact intelligence generated by {informant.Name}");
+                }
+            }
         }
     }
 }
