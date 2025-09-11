@@ -275,6 +275,21 @@ namespace SecretAlliances
             // Create intelligence record
             if (informant != null)
             {
+                // Determine intelligence category based on alliance features
+                AllianceIntelType intelType = AllianceIntelType.General;
+                if (alliance.TradePact && alliance.MilitaryPact)
+                {
+                    intelType = MBRandom.RandomFloat < 0.5f ? AllianceIntelType.Trade : AllianceIntelType.Military;
+                }
+                else if (alliance.TradePact)
+                {
+                    intelType = AllianceIntelType.Trade;
+                }
+                else if (alliance.MilitaryPact)
+                {
+                    intelType = AllianceIntelType.Military;
+                }
+
                 var intel = new AllianceIntelligence
                 {
                     AllianceId = alliance.UniqueId, // Using unique identifier
@@ -282,11 +297,14 @@ namespace SecretAlliances
                     ReliabilityScore = CalculateInformerReliability(informant),
                     DaysOld = 0,
                     IsConfirmed = false,
-                    SeverityLevel = severity
+                    SeverityLevel = severity,
+                    ClanAId = alliance.InitiatorClanId,
+                    ClanBId = alliance.TargetClanId,
+                    IntelCategory = (int)intelType
                 };
                 _intelligence.Add(intel);
 
-                Debug.Print($"[Secret Alliances] Intelligence leaked by {informant.Name} (Reliability: {intel.ReliabilityScore:F2}, Severity: {severity:F2})");
+                Debug.Print($"[Secret Alliances] Intelligence leaked by {informant.Name} about {alliance.GetInitiatorClan()?.Name} <-> {alliance.GetTargetClan()?.Name} (Reliability: {intel.ReliabilityScore:F2}, Severity: {severity:F2}, Category: {intelType})");
             }
 
             // Apply consequences
@@ -1470,7 +1488,7 @@ namespace SecretAlliances
 
             var alliance = new SecretAllianceRecord
             {
-                
+                UniqueId = initiator.Id, // Use InitiatorClanId as surrogate UniqueId
                 InitiatorClanId = initiator.Id,
                 TargetClanId = target.Id,
                 Secrecy = initialSecrecy,
@@ -1479,7 +1497,7 @@ namespace SecretAlliances
                 IsActive = true,
                 CreatedGameDay = CampaignTime.Now.GetDayOfYear,
                 LastInteractionDay = CampaignTime.Now.GetDayOfYear,
-                CooldownDays = 5,
+                CooldownDays = 0, // Changed from 5 to 0 to allow immediate pact offers
                 TradePact = false,
                 MilitaryPact = false,
                 TrustLevel = 0.5f,
@@ -1620,24 +1638,81 @@ namespace SecretAlliances
 
             return true;
         }
+
+        // Helper method to determine if a trade pact can be offered
+        public bool CanOfferTradePact(Clan a, Clan b)
+        {
+            if (a == null || b == null) return false;
+
+            var alliance = FindAlliance(a, b);
+            if (alliance == null || !alliance.IsActive) return false;
+
+            // Check if trade pact already exists
+            if (alliance.TradePact) return false;
+
+            // Check if not on cooldown
+            if (alliance.IsOnCooldown()) return false;
+
+            // Check trust level >= 0.35
+            if (alliance.TrustLevel < 0.35f) return false;
+
+            // Check secrecy >= 0.15
+            if (alliance.Secrecy < 0.15f) return false;
+
+            return true;
+        }
+
         public bool TryGetRumorsForHero(Hero hero, out string rumorSummary)
         {
             rumorSummary = "";
             if (hero?.Clan == null) return false;
 
-            // Check if this hero might know about alliances
+            // Check if this hero might know about alliances using ClanAId/ClanBId for relevance filtering
             var relevantIntel = _intelligence.Where(i =>
                 i.ReliabilityScore > 0.3f &&
                 i.DaysOld < 45 &&
-                (i.GetInformer()?.Clan == hero.Clan || i.AllianceId == hero.Clan.Id)).ToList();
+                (i.GetInformer()?.Clan == hero.Clan || 
+                 i.ClanAId == hero.Clan.Id || 
+                 i.ClanBId == hero.Clan.Id || 
+                 (i.GetInformer()?.Clan?.Kingdom != null && i.GetInformer().Clan.Kingdom == hero.Clan.Kingdom))).ToList();
 
             if (!relevantIntel.Any()) return false;
 
-            var intel = relevantIntel.First();
-            rumorSummary = $"There are whispers of secret dealings... (Reliability: {intel.ReliabilityScore:F1}, Age: {intel.DaysOld} days)";
+            // Rank by reliability * recencyWeight (recencyWeight = 1 - DaysOld * 0.01, floor at 0.5)
+            var rankedIntel = relevantIntel
+                .Select(i => new
+                {
+                    Intel = i,
+                    RecencyWeight = MathF.Max(0.5f, 1f - i.DaysOld * 0.01f),
+                    Score = i.ReliabilityScore * MathF.Max(0.5f, 1f - i.DaysOld * 0.01f)
+                })
+                .OrderByDescending(x => x.Score)
+                .ToList();
 
-            Debug.Print($"[Secret Alliances] Rumors shared by {hero.Name}: {rumorSummary}");
+            var topIntel = rankedIntel.First();
+            var intel = topIntel.Intel;
+            
+            rumorSummary = $"There are whispers of secret dealings between clans... (Reliability: {intel.ReliabilityScore:F1}, Age: {intel.DaysOld} days, Score: {topIntel.Score:F2})";
+
+            Debug.Print($"[Secret Alliances] Rumors shared by {hero.Name}: {rumorSummary} (Count: {relevantIntel.Count}, Top: {topIntel.Score:F2})");
             return true;
+        }
+
+        // Helper method to gate rumor dialogue options
+        public bool ShouldShowRumorOption(Hero hero)
+        {
+            if (hero?.Clan == null) return false;
+
+            // Check if there's any relevant intelligence this hero could share
+            var hasIntel = _intelligence.Any(i =>
+                i.ReliabilityScore > 0.3f &&
+                i.DaysOld < 45 &&
+                (i.GetInformer()?.Clan == hero.Clan ||
+                 i.ClanAId == hero.Clan.Id ||
+                 i.ClanBId == hero.Clan.Id ||
+                 (i.GetInformer()?.Clan?.Kingdom != null && i.GetInformer().Clan.Kingdom == hero.Clan.Kingdom)));
+
+            return hasIntel;
         }
     }
 }

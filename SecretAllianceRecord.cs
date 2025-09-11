@@ -7,6 +7,17 @@ using TaleWorlds.SaveSystem;
 
 namespace SecretAlliances
 {
+    // Internal enum for intelligence categories
+    internal enum AllianceIntelType : int
+    {
+        General = 0,
+        Trade = 1,
+        Military = 2,
+        Coup = 3,
+        Financial = 4,
+        Recruitment = 5
+    }
+
     [Serializable] // give it a unique id for your mod
     public class SecretAllianceRecord
     {
@@ -21,6 +32,12 @@ namespace SecretAlliances
             GroupId = 0;
             LastInteractionDay = 0;
             CooldownDays = 0;
+            
+            // Initialize core stabilization fields
+            LastOperationDay = 0;
+            PendingOperationType = 0;
+            GroupSecrecyCache = 0f;
+            GroupStrengthCache = 0f;
         }
 
         [SaveableField(1)] public MBGUID InitiatorClanId;
@@ -58,6 +75,12 @@ namespace SecretAlliances
         [SaveableField(26)] public bool MilitaryPact;
         [SaveableField(27)] public int GroupId;
 
+        // Core stabilization fields (append-only for save compatibility)
+        [SaveableField(28)] public int LastOperationDay;
+        [SaveableField(29)] public int PendingOperationType;
+        [SaveableField(30)] public float GroupSecrecyCache;
+        [SaveableField(31)] public float GroupStrengthCache;
+
 
 
         public Clan GetInitiatorClan()
@@ -82,6 +105,11 @@ namespace SecretAlliances
         [SaveableField(4)] public int DaysOld;
         [SaveableField(5)] public bool IsConfirmed;
         [SaveableField(6)] public float SeverityLevel;
+        
+        // Core stabilization fields (append-only for save compatibility)
+        [SaveableField(7)] public MBGUID ClanAId;
+        [SaveableField(8)] public MBGUID ClanBId;
+        [SaveableField(9)] public int IntelCategory;
 
         public Hero GetInformer()
             => MBObjectManager.Instance.GetObject<Hero>(h => h.Id == InformerHeroId);
