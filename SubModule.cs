@@ -161,7 +161,7 @@ namespace SecretAlliances
                 "sa_gather_info",
                 "hero_main_options",
                 "sa_info_response",
-                "{=SA_GatherInfo}I've heard interesting rumors...",
+                "{=SA_GatherInfo}Have you heard any rumors?",
                 CanGatherIntelligence,
                 null,
                 100,
@@ -169,12 +169,20 @@ namespace SecretAlliances
                 null);
 
             starter.AddDialogLine(
-                "sa_info_response",
+                "sa_info_response_has_rumors",
                 "sa_info_response",   // comes from sa_gather_info
-                "hero_main_options",
-                "{=SA_InfoResponse}Rumors are dangerous things...",
-                () => true,
+                "lord_pretalk",
+                "{=SA_InfoResponseRumors}Indeed, there are whispers of secret dealings...",
+                () => HasRumorsToShare(),
                 ShareIntelligence);
+
+            starter.AddDialogLine(
+                "sa_info_response_no_rumors",
+                "sa_info_response",   // comes from sa_gather_info
+                "lord_pretalk",
+                "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
+                () => !HasRumorsToShare(),
+                null);
         }
 
 
@@ -208,12 +216,16 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan == null) return false;
 
-            // Can gather intel if hero might know about secret alliances
-            var alliances = _allianceBehavior?.GetActiveAlliances();
-            return alliances?.Any(a =>
-                a.InitiatorClanId == targetHero.Clan.Id ||
-                a.TargetClanId == targetHero.Clan.Id ||
-                a.Secrecy < 0.6f) ?? false; // Or if alliances are becoming known
+            // Can gather intel if this hero might know about secret alliances
+            return true; // Always show option, but may not have rumors
+        }
+
+        private bool HasRumorsToShare()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero == null) return false;
+
+            return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
         }
 
         private bool SecretAllianceClickableCondition(out TextObject explanation)
@@ -236,11 +248,8 @@ namespace SecretAlliances
 
             if (targetHero?.Clan == null || playerClan == null) return;
 
-            // Store evaluation result for decision
-            // AFTER
-            // AFTER (Use the specific method for integers)
-            // AFTER: Store the result in our new private field
-            _currentAllianceEvaluationScore = CalculateAllianceAcceptanceScore(playerClan, targetHero.Clan);
+            // Store evaluation result for decision using acceptance score
+            _currentAllianceEvaluationScore = _allianceBehavior?.GetAcceptanceScore(playerClan, targetHero.Clan) ?? 0;
         }
 
         private void EvaluateBribeOffer()
@@ -263,9 +272,8 @@ namespace SecretAlliances
 
         private bool ShouldAcceptAlliance()
         {
-            // Check stored evaluation score
-            
-            return _currentAllianceEvaluationScore >= 60;
+            // Check stored evaluation score - require ~70% for acceptance
+            return _currentAllianceEvaluationScore >= 70;
         }
 
         private bool ShouldAcceptBribe()
@@ -293,6 +301,9 @@ namespace SecretAlliances
 
             if (targetHero?.Clan == null || playerClan == null) return;
 
+            // Check for existing alliance to prevent duplicates
+            if (_allianceBehavior?.FindAlliance(playerClan, targetHero.Clan) != null) return;
+
             // Calculate initial alliance parameters
             float initialSecrecy = 0.75f + (MBRandom.RandomFloat * 0.2f); // 0.75-0.95
             float initialStrength = 0.08f + (MBRandom.RandomFloat * 0.12f); // 0.08-0.2
@@ -303,9 +314,12 @@ namespace SecretAlliances
             ChangeRelationAction.ApplyPlayerRelation(targetHero, 5, true, false);
 
             // Player loses some influence for the secretive nature
-            // AFTER
-            // AFTER (This is the correct method for the API)
             ChangeClanInfluenceAction.Apply(playerClan, -10f);
+            
+            InformationManager.DisplayMessage(new InformationMessage($"Secret alliance formed with {targetHero.Clan.Name}!", Colors.Green));
+            
+            // Reset transient conversation state
+            ResetConversationState();
         }
 
         private void AcceptBribe()
@@ -315,7 +329,6 @@ namespace SecretAlliances
 
             if (targetHero?.Clan == null || playerClan == null) return;
 
-            // AFTER
             int amount = _currentBribeAmount;
 
             // Transfer money
@@ -335,6 +348,18 @@ namespace SecretAlliances
             {
                 targetHero.AddSkillXp(DefaultSkills.Roguery, 100); // Becomes more roguish
             }
+            
+            InformationManager.DisplayMessage(new InformationMessage($"Bribed alliance formed with {targetHero.Clan.Name} for {amount} denars!", Colors.Yellow));
+            
+            // Reset transient conversation state
+            ResetConversationState();
+        }
+
+        private void ResetConversationState()
+        {
+            _currentAllianceEvaluationScore = 0;
+            _currentBribeReceptivity = 0;
+            _currentBribeAmount = 0;
         }
 
         private void ShareIntelligence()
@@ -342,108 +367,20 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return;
 
-            var intelligence = _allianceBehavior?.GetIntelligence();
-            if (intelligence == null || !intelligence.Any()) return;
-
-            // Share some intelligence about secret alliances
-            var relevantIntel = intelligence.Where(i =>
-                i.ReliabilityScore > 0.4f &&
-                i.DaysOld < 30).Take(2);
-
-            foreach (var intel in relevantIntel)
+            if (_allianceBehavior?.TryGetRumorsForHero(targetHero, out string rumorSummary) == true)
             {
-                // Player gains knowledge about secret alliances
-                var informer = intel.GetInformer();
-                if (informer?.Clan != null)
-                {
-                    // Improve relation with informant slightly
-                    ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
-                }
+                InformationManager.DisplayMessage(new InformationMessage($"Rumor learned: {rumorSummary}", Colors.Yellow));
+                Debug.Print($"[Secret Alliances] Rumor shared: {rumorSummary}");
+                
+                // Player gains roguery skill for intelligence gathering
+                Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 25);
+                
+                // Improve relation slightly
+                ChangeRelationAction.ApplyPlayerRelation(targetHero, 1, false, false);
             }
-
-            // Player gains roguery skill for intelligence gathering
-            Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
         }
 
         // Helper calculation methods
-        private int CalculateAllianceAcceptanceScore(Clan playerClan, Clan targetClan)
-        {
-            int score = 50; // Base 50% chance
-
-            // Relationship factor (most important)
-            if (targetClan.Leader != null)
-            {
-                int relation = targetClan.Leader.GetRelation(Hero.MainHero);
-                score += relation / 2; // Each relation point = 0.5% acceptance
-            }
-
-            // Economic factors
-            if (playerClan.Gold > targetClan.Gold * 1.5f)
-            {
-                score += 10; // Player is wealthy
-            }
-            else if (playerClan.Gold < targetClan.Gold * 0.5f)
-            {
-                score -= 10; // Player is poor
-            }
-
-            // Military strength comparison
-            float strengthRatio = playerClan.TotalStrength / System.Math.Max(1f, targetClan.TotalStrength);
-            if (strengthRatio > 1.5f)
-            {
-                score += 15; // Player is much stronger
-            }
-            else if (strengthRatio < 0.5f)
-            {
-                score -= 10; // Player is much weaker
-            }
-
-            // Political situation
-            if (playerClan.Kingdom != null && targetClan.Kingdom != null)
-            {
-                if (playerClan.Kingdom.IsAtWarWith(targetClan.Kingdom))
-                {
-                    score -= 30; // Much harder if at war
-                }
-                else if (playerClan.Kingdom == targetClan.Kingdom)
-                {
-                    score += 10; // Easier if same kingdom
-                }
-            }
-
-            // Target clan's current situation
-            if (targetClan.Gold < 2000)
-            {
-                score += 15; // Desperate for resources
-            }
-
-            if (targetClan.TotalStrength < 100f)
-            {
-                score += 10; // Militarily weak, needs allies
-            }
-
-            // Leader personality traits
-            if (targetClan.Leader != null)
-            {
-                var traits = targetClan.Leader.GetHeroTraits();
-                score += traits.Calculating * 5; // Calculating leaders more likely to accept
-                score -= traits.Honor * 3; // Honorable leaders less likely
-                score += traits.Valor * 2; // Brave leaders more willing to take risks
-            }
-
-            // Player's reputation and skills
-            int leadership = Hero.MainHero.GetSkillValue(DefaultSkills.Leadership);
-            int charm = Hero.MainHero.GetSkillValue(DefaultSkills.Charm);
-            int roguery = Hero.MainHero.GetSkillValue(DefaultSkills.Roguery);
-
-            score += (leadership + charm + roguery) / 10; // Skills help persuasion
-
-            // Random factor for unpredictability
-            score += MBRandom.RandomInt(-15, 15);
-
-            return System.Math.Max(0, System.Math.Min(100, score));
-        }
-
         private int CalculateBribeReceptivity(Hero targetHero)
         {
             int receptivity = 30; // Base 30% receptivity

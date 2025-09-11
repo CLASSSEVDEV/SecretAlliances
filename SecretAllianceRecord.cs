@@ -13,6 +13,13 @@ namespace SecretAlliances
         {
             Loyalists = new List<MBGUID>();
             Informants = new List<MBGUID>();
+            
+            // Initialize new fields with default values
+            TradePact = false;
+            MilitaryPact = false;
+            GroupId = 0;
+            LastInteractionDay = 0;
+            CooldownDays = 0;
         }
 
         [SaveableField(1)] public MBGUID InitiatorClanId;
@@ -42,6 +49,13 @@ namespace SecretAlliances
         [SaveableField(20)] public bool BetrayalRevealed;
         [SaveableField(21)] public int SuccessfulOperations;
 
+        // New fields for trade pacts, military pacts, and coalition support
+        [SaveableField(22)] public bool TradePact;
+        [SaveableField(23)] public bool MilitaryPact;
+        [SaveableField(24)] public int GroupId;
+        [SaveableField(25)] public int LastInteractionDay;
+        [SaveableField(26)] public int CooldownDays;
+
         public Clan GetInitiatorClan()
             => MBObjectManager.Instance.GetObject<Clan>(c => c.Id == InitiatorClanId);
 
@@ -50,6 +64,9 @@ namespace SecretAlliances
 
         public bool IsValidAlliance()
             => GetInitiatorClan() != null && GetTargetClan() != null && IsActive;
+
+        public bool IsOnCooldown()
+            => CampaignTime.Now.GetDayOfYear < (LastInteractionDay + CooldownDays);
     }
 
     [Serializable]
