@@ -93,6 +93,13 @@ namespace SecretAlliances
 
             // Process intelligence aging daily
             ProcessIntelligence();
+            
+            // Process coalition cohesion (once per day, triggered by first clan)
+            if (clan == Clan.All.FirstOrDefault())
+            {
+                CalculateCoalitionCohesion();
+                ProcessOperationsScaffolding();
+            }
         }
 
         private void EvaluateAlliance(SecretAllianceRecord alliance)
@@ -282,7 +289,11 @@ namespace SecretAlliances
                     ReliabilityScore = CalculateInformerReliability(informant),
                     DaysOld = 0,
                     IsConfirmed = false,
-                    SeverityLevel = severity
+                    SeverityLevel = severity,
+                    // Fix: Add clan pair tracking for proper filtering
+                    ClanAId = alliance.InitiatorClanId,
+                    ClanBId = alliance.TargetClanId,
+                    IntelCategory = (int)AllianceIntelType.GeneralRumor
                 };
                 _intelligence.Add(intel);
 
@@ -494,16 +505,37 @@ namespace SecretAlliances
 
             if (initiator?.Leader == null || target?.Leader == null) return;
 
-            // Calculate daily gold transfer based on EconomicIncentive and TrustLevel
+            // Enhanced trade pact logic with adaptive wealth balancing
             int baseAmount = MBRandom.RandomInt(25, 150);
-            float multiplier = alliance.EconomicIncentive * alliance.TrustLevel;
-            int transferAmount = (int)(baseAmount * multiplier);
+            
+            // Bound multipliers to prevent runaway effects
+            float economicMultiplier = MathF.Min(2.0f, MathF.Max(0.1f, alliance.EconomicIncentive));
+            float trustMultiplier = MathF.Min(1.5f, MathF.Max(0.2f, alliance.TrustLevel));
+            
+            int transferAmount = (int)(baseAmount * economicMultiplier * trustMultiplier);
 
             if (transferAmount < 5) return; // Skip very small amounts
 
+            // Adaptive wealth balancing - consider wealth disparity
+            int initiatorGold = initiator.Gold;
+            int targetGold = target.Gold;
+            int totalGold = initiatorGold + targetGold;
+            
+            if (totalGold < 1000) return; // Skip if both clans are too poor
+            
+            // Calculate wealth imbalance ratio (0 = perfect balance, 1 = extreme imbalance)
+            float wealthImbalance = MathF.Abs(initiatorGold - targetGold) / (float)MathF.Max(1, totalGold);
+            
+            // Scale transfer based on imbalance (more imbalance = larger transfers)
+            transferAmount = (int)(transferAmount * (0.5f + wealthImbalance));
+            
+            // Cap transfer to prevent excessive amounts
+            int maxTransfer = MathF.Max(initiatorGold, targetGold) / 20; // Max 5% of richer clan's wealth
+            transferAmount = MathF.Min(transferAmount, maxTransfer);
+
             // Transfer from richer to poorer clan
             Hero richer, poorer;
-            if (initiator.Gold > target.Gold)
+            if (initiatorGold > targetGold)
             {
                 richer = initiator.Leader;
                 poorer = target.Leader;
@@ -519,10 +551,15 @@ namespace SecretAlliances
             {
                 GiveGoldAction.ApplyBetweenCharacters(richer, poorer, transferAmount, false);
 
-                // Secrecy decays slightly due to trade activities
-                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.001f);
+                // Secrecy erosion with bounds - more activity = more secrecy loss
+                float secrecyLoss = MathF.Min(0.005f, 0.0005f + (transferAmount / 50000f));
+                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
+                
+                // Incremental trust building (bounded)
+                float trustGain = MathF.Min(0.002f, transferAmount / 100000f);
+                alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + trustGain);
 
-                Debug.Print($"[Secret Alliances] Trade Pact: {richer.Name} transferred {transferAmount} denars to {poorer.Name} (Alliance GroupId: {alliance.GroupId})");
+                Debug.Print($"[Secret Alliances] Trade Pact: {richer.Name} transferred {transferAmount} denars to {poorer.Name} (Alliance GroupId: {alliance.GroupId}, Trust: {alliance.TrustLevel:F2})");
             }
         }
 
@@ -1163,29 +1200,48 @@ namespace SecretAlliances
         private bool EvaluateSideDefection(MapEvent mapEvent, Clan sideClan, Clan opposingClan, List<SecretAllianceRecord> relevantAlliances)
         {
             float defectionProbability = 0.05f; // Base 5% chance
+            var factors = new List<string> { "Base: 0.05" }; // Debug factor breakdown
 
+            // Alliance factors
             foreach (var alliance in relevantAlliances)
             {
-                // Alliance strength increases defection chance
-                defectionProbability += alliance.Strength * 0.3f;
+                // Alliance strength increases defection chance (bounded)
+                float strengthBonus = MathF.Min(0.3f, alliance.Strength * 0.3f);
+                defectionProbability += strengthBonus;
+                factors.Add($"Strength: +{strengthBonus:F3}");
 
-                // Trust level affects loyalty
-                defectionProbability += alliance.TrustLevel * 0.2f;
+                // Trust level affects loyalty (bounded)
+                float trustBonus = MathF.Min(0.2f, alliance.TrustLevel * 0.2f);
+                defectionProbability += trustBonus;
+                factors.Add($"Trust: +{trustBonus:F3}");
 
                 // Military pact makes defection more likely
                 if (alliance.MilitaryPact)
                 {
                     defectionProbability += 0.15f;
+                    factors.Add($"MilitaryPact: +0.15");
+                }
+                
+                // Coalition strength bonus
+                if (alliance.GroupStrengthCache > 0)
+                {
+                    float coalitionBonus = MathF.Min(0.1f, alliance.GroupStrengthCache * 0.1f);
+                    defectionProbability += coalitionBonus;
+                    factors.Add($"Coalition: +{coalitionBonus:F3}");
                 }
             }
 
-            // Political pressure increases defection likelihood
+            // Political pressure increases defection likelihood (bounded)
             float pressure = CalculatePoliticalPressure(sideClan, opposingClan);
-            defectionProbability += pressure * 0.2f;
+            float pressureBonus = MathF.Min(0.2f, pressure * 0.2f);
+            defectionProbability += pressureBonus;
+            factors.Add($"Pressure: +{pressureBonus:F3}");
 
-            // Desperation increases defection chance
+            // Desperation increases defection chance (bounded)
             float desperation = CalculateDesperationLevel(sideClan);
-            defectionProbability += desperation * 0.25f;
+            float desperationBonus = MathF.Min(0.25f, desperation * 0.25f);
+            defectionProbability += desperationBonus;
+            factors.Add($"Desperation: +{desperationBonus:F3}");
 
             // Relative battlefield power affects decision
             try
@@ -1197,23 +1253,30 @@ namespace SecretAlliances
                 if (opposingStrength > sideStrength * 1.5f)
                 {
                     defectionProbability += 0.1f;
+                    factors.Add($"PowerImbalance: +0.1");
                 }
             }
             catch
             {
                 // Fallback if battle strength calculation fails
                 defectionProbability += 0.05f;
+                factors.Add($"PowerFallback: +0.05");
             }
 
-            // Cap the probability
+            // Cap the probability to prevent excessive defection
+            float originalProbability = defectionProbability;
             defectionProbability = MathF.Min(0.4f, defectionProbability);
+            
+            if (originalProbability != defectionProbability)
+            {
+                factors.Add($"Capped: {originalProbability:F3} -> {defectionProbability:F3}");
+            }
 
             bool shouldDefect = MBRandom.RandomFloat < defectionProbability;
 
-            if (shouldDefect)
-            {
-                Debug.Print($"[Secret Alliances] Defection probability for {sideClan.Name}: {defectionProbability:F3} - DEFECTING");
-            }
+            // Enhanced debug logging with factor breakdown
+            string factorBreakdown = string.Join(", ", factors);
+            Debug.Print($"[Secret Alliances] {sideClan.Name} defection eval vs {opposingClan.Name}: {defectionProbability:F3} [{factorBreakdown}] -> {(shouldDefect ? "DEFECTING" : "STAYING")}");
 
             return shouldDefect;
         }
@@ -1473,6 +1536,7 @@ namespace SecretAlliances
                 
                 InitiatorClanId = initiator.Id,
                 TargetClanId = target.Id,
+                UniqueId = MBGUID.GenerateNewGUID(), // Fix: Initialize UniqueId properly
                 Secrecy = initialSecrecy,
                 Strength = initialStrength,
                 BribeAmount = bribe,
@@ -1626,10 +1690,13 @@ namespace SecretAlliances
             if (hero?.Clan == null) return false;
 
             // Check if this hero might know about alliances
+            // Fix: Use proper clan pair filtering instead of incorrect AllianceId comparison
             var relevantIntel = _intelligence.Where(i =>
                 i.ReliabilityScore > 0.3f &&
                 i.DaysOld < 45 &&
-                (i.GetInformer()?.Clan == hero.Clan || i.AllianceId == hero.Clan.Id)).ToList();
+                (i.GetInformer()?.Clan == hero.Clan || 
+                 i.ClanAId == hero.Clan.Id || 
+                 i.ClanBId == hero.Clan.Id)).ToList();
 
             if (!relevantIntel.Any()) return false;
 
@@ -1638,6 +1705,144 @@ namespace SecretAlliances
 
             Debug.Print($"[Secret Alliances] Rumors shared by {hero.Name}: {rumorSummary}");
             return true;
+        }
+
+        // Helper predicates for UI/dialogue integration
+        public bool ShouldShowRumorOption(Hero hero)
+        {
+            if (hero?.Clan == null) return false;
+            
+            // Check if hero has any relevant intelligence or is part of alliances
+            var hasIntel = _intelligence.Any(i =>
+                i.ReliabilityScore > 0.3f &&
+                i.DaysOld < 45 &&
+                (i.GetInformer()?.Clan == hero.Clan ||
+                 i.ClanAId == hero.Clan.Id ||
+                 i.ClanBId == hero.Clan.Id));
+                 
+            var hasAlliances = _alliances.Any(a => a.IsActive &&
+                (a.InitiatorClanId == hero.Clan.Id || a.TargetClanId == hero.Clan.Id));
+                
+            return hasIntel || hasAlliances;
+        }
+
+        public bool CanOfferTradePact(Clan proposer, Clan target)
+        {
+            if (proposer == null || target == null) return false;
+            
+            var alliance = FindAlliance(proposer, target);
+            if (alliance == null || !alliance.IsActive) return false;
+            
+            // Can offer trade pact if not already active and alliance is strong enough
+            return !alliance.TradePact && 
+                   alliance.Strength >= 0.3f && 
+                   alliance.Secrecy >= 0.2f &&
+                   !alliance.IsOnCooldown();
+        }
+
+        public bool CanOfferMilitaryPact(Clan proposer, Clan target)
+        {
+            if (proposer == null || target == null) return false;
+            
+            var alliance = FindAlliance(proposer, target);
+            if (alliance == null || !alliance.IsActive) return false;
+            
+            // Military pact requires higher strength and trust
+            return !alliance.MilitaryPact &&
+                   alliance.Strength >= 0.5f &&
+                   alliance.TrustLevel >= 0.6f &&
+                   !alliance.IsOnCooldown();
+        }
+
+        // Coalition cohesion mechanics
+        private void CalculateCoalitionCohesion()
+        {
+            // Group alliances by GroupId
+            var coalitions = _alliances.Where(a => a.IsActive && a.GroupId > 0)
+                                     .GroupBy(a => a.GroupId)
+                                     .Where(g => g.Count() > 1); // Only process actual coalitions
+
+            foreach (var coalition in coalitions)
+            {
+                var alliances = coalition.ToList();
+                
+                // Calculate average secrecy and strength for the group
+                float avgSecrecy = alliances.Average(a => a.Secrecy);
+                float avgStrength = alliances.Average(a => a.Strength);
+                
+                // Calculate cohesion based on variance (lower variance = higher cohesion)
+                float secrecyVariance = alliances.Sum(a => MathF.Pow(a.Secrecy - avgSecrecy, 2)) / alliances.Count;
+                float strengthVariance = alliances.Sum(a => MathF.Pow(a.Strength - avgStrength, 2)) / alliances.Count;
+                
+                float cohesion = MathF.Max(0f, 1f - (secrecyVariance + strengthVariance));
+                
+                // Update group caches for all alliances in the coalition
+                foreach (var alliance in alliances)
+                {
+                    alliance.GroupSecrecyCache = avgSecrecy * (0.8f + cohesion * 0.2f); // Cohesion slightly boosts effective secrecy
+                    alliance.GroupStrengthCache = avgStrength * (0.9f + cohesion * 0.1f); // Cohesion slightly boosts effective strength
+                }
+                
+                Debug.Print($"[Secret Alliances] Coalition {coalition.Key}: Cohesion={cohesion:F2}, AvgSecrecy={avgSecrecy:F2}, AvgStrength={avgStrength:F2}");
+            }
+        }
+
+        private void ProcessOperationsScaffolding()
+        {
+            // Scaffolding for future operations system
+            var currentDay = CampaignTime.Now.GetDayOfYear;
+            
+            foreach (var alliance in _alliances.Where(a => a.IsActive))
+            {
+                // Check if any operations are ready to complete
+                if (alliance.PendingOperationType > 0 && 
+                    currentDay >= alliance.LastOperationDay + 7) // Operations take 7 days
+                {
+                    ProcessOperation(alliance);
+                }
+                
+                // Randomly consider new operations for strong alliances
+                if (alliance.Strength >= 0.7f && 
+                    alliance.PendingOperationType == 0 && 
+                    MBRandom.RandomFloat < 0.05f) // 5% chance per day
+                {
+                    ConsiderNewOperation(alliance);
+                }
+            }
+        }
+
+        private void ProcessOperation(SecretAllianceRecord alliance)
+        {
+            // Placeholder for operations processing
+            Debug.Print($"[Secret Alliances] Operation type {alliance.PendingOperationType} completed for alliance {alliance.InitiatorClanId}-{alliance.TargetClanId}");
+            
+            // Simple operation effects for now
+            alliance.SuccessfulOperations++;
+            alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.05f);
+            
+            // Reset operation state
+            alliance.PendingOperationType = 0;
+            alliance.LastOperationDay = 0;
+        }
+
+        private void ConsiderNewOperation(SecretAllianceRecord alliance)
+        {
+            // Placeholder for operation consideration
+            if (alliance.MilitaryPact && MBRandom.RandomFloat < 0.6f)
+            {
+                alliance.PendingOperationType = 1; // Military operation
+            }
+            else if (alliance.TradePact && MBRandom.RandomFloat < 0.4f)
+            {
+                alliance.PendingOperationType = 2; // Economic operation
+            }
+            else
+            {
+                alliance.PendingOperationType = 3; // Intelligence operation
+            }
+            
+            alliance.LastOperationDay = CampaignTime.Now.GetDayOfYear;
+            Debug.Print($"[Secret Alliances] New operation type {alliance.PendingOperationType} started for alliance {alliance.InitiatorClanId}-{alliance.TargetClanId}");
         }
     }
 }
