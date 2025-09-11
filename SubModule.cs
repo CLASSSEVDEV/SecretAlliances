@@ -27,14 +27,19 @@ namespace SecretAlliances
                 _allianceBehavior = new SecretAllianceBehavior();
                 campaignStarter.AddBehavior(_allianceBehavior);
 
-                campaignStarter.AddBehavior(new SecretAllianceBehavior());
-
                 // Register dialog lines for secret alliance system
                 AddDialogs(campaignStarter);
 
                 AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
 
                 InformationManager.DisplayMessage(new InformationMessage("Secret Alliances loaded!", Colors.Cyan));
+                
+                // Debug: Dump all alliances on startup for testing
+                // This will show any existing alliances when loading a save
+                if (_allianceBehavior != null)
+                {
+                    AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                }
             }
         }
 
@@ -77,10 +82,10 @@ namespace SecretAlliances
             starter.AddPlayerLine(
                 "sa_nevermind",
                 "sa_player_options",
-                "hero_main_options",
+                "lord_pretalk",
                 "{=SA_Nevermind}Perhaps another time.",
                 () => true,
-                null);
+                () => ResetConversationState());
 
             // --- ALLIANCE BRANCH ---
             starter.AddDialogLine(
@@ -94,18 +99,18 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_accept",
                 "sa_alliance_decision",
-                "hero_main_options",
-                "{=SA_AllianceAccept}Very well. Our clans shall coordinate in secret...",
+                "lord_pretalk",
+                "{=SA_AllianceAccept}Very well. Our clans shall coordinate in secret.",
                 ShouldAcceptAlliance,
                 AcceptAlliance);
 
             starter.AddDialogLine(
                 "sa_alliance_reject",
                 "sa_alliance_decision",
-                "hero_main_options",
-                "{=SA_AllianceReject}The risks are too great...",
+                "lord_pretalk",
+                "{=SA_AllianceReject}The risks are too great. I must decline.",
                 () => !ShouldAcceptAlliance(),
-                null);
+                RejectAlliance);
 
             // --- BRIBE BRANCH ---
             starter.AddDialogLine(
@@ -143,18 +148,18 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_accept",
                 "sa_bribe_result",
-                "hero_main_options",
-                "{=SA_BribeAccept}Your generosity is noted...",
+                "lord_pretalk",
+                "{=SA_BribeAccept}Your generosity is noted.",
                 ShouldAcceptBribe,
                 AcceptBribe);
 
             starter.AddDialogLine(
                 "sa_bribe_reject",
                 "sa_bribe_result",
-                "hero_main_options",
-                "{=SA_BribeReject}My loyalty is worth more than gold...",
+                "lord_pretalk",
+                "{=SA_BribeReject}My loyalty is worth more than gold.",
                 () => !ShouldAcceptBribe(),
-                null);
+                () => ResetConversationState());
 
             // --- INTELLIGENCE ---
             starter.AddPlayerLine(
@@ -272,6 +277,15 @@ namespace SecretAlliances
 
         private bool ShouldAcceptAlliance()
         {
+            var targetHero = Hero.OneToOneConversationHero;
+            var playerClan = Clan.PlayerClan;
+
+            // Check for existing alliance first
+            if (_allianceBehavior?.FindAlliance(playerClan, targetHero?.Clan) != null)
+            {
+                return false;
+            }
+
             // Check stored evaluation score - require ~70% for acceptance
             return _currentAllianceEvaluationScore >= 70;
         }
@@ -360,6 +374,18 @@ namespace SecretAlliances
             _currentAllianceEvaluationScore = 0;
             _currentBribeReceptivity = 0;
             _currentBribeAmount = 0;
+        }
+
+        private void RejectAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero != null)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"{targetHero.Name} rejected your alliance proposal.", Colors.Red));
+            }
+            
+            // Reset transient conversation state
+            ResetConversationState();
         }
 
         private void ShareIntelligence()

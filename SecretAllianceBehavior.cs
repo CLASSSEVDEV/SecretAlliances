@@ -153,9 +153,9 @@ namespace SecretAlliances
         {
             if (!alliance.MilitaryPact || !alliance.IsActive) return;
 
-            Debug.Print($"[Secret Alliances] Military Pact active for alliance GroupId {alliance.GroupId}");
+            Debug.Print($"[Secret Alliances] Military Pact active for alliance GroupId {alliance.GroupId} - enhanced strength growth and coordination");
             
-            // Military pacts affect secrecy (slightly more decay) but are handled in UpdateAllianceStrength and UpdateAllianceSecrecy
+            // Military pacts are handled in UpdateAllianceStrength (1.5x multiplier) and UpdateAllianceSecrecy (additional decay)
         }
 
         private void UpdateAllianceSecrecy(SecretAllianceRecord alliance)
@@ -831,6 +831,8 @@ namespace SecretAlliances
             }
 
             CreateAlliance(initiator, target, initialSecrecy, initialStrength, bribeAmount);
+            
+            Debug.Print($"[Secret Alliances] AI alliance created: {initiator.Name} -> {target.Name}, strength: {initialStrength:F2}, secrecy: {initialSecrecy:F2}");
         }
 
         private bool HasExistingAlliance(Clan clan1, Clan clan2)
