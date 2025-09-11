@@ -71,12 +71,19 @@ namespace SecretAlliances
 
                 if (initiator == null || target == null) continue;
 
-                info.Add($"Alliance: {initiator.Name} <-> {target.Name}");
+                info.Add($"Alliance: {initiator.Name} <-> {target.Name} (ID: {alliance.UniqueId})");
                 info.Add($"  Strength: {alliance.Strength:F2} | Secrecy: {alliance.Secrecy:F2} | Trust: {alliance.TrustLevel:F2}");
                 info.Add($"  Bribe: {alliance.BribeAmount:F0} | Days Active: {CampaignTime.Now.GetDayOfYear - alliance.CreatedGameDay}");
+                info.Add($"  GroupId: {alliance.GroupId} | Bribe: {alliance.BribeAmount:F0} | Days Active: {CampaignTime.Now.GetDayOfYear - alliance.CreatedGameDay}");
+           
                 info.Add($"  Political Pressure: {alliance.PoliticalPressure:F2} | Military Advantage: {alliance.MilitaryAdvantage:F2}");
                 info.Add($"  Common Enemies: {alliance.HasCommonEnemies} | Coup Attempted: {alliance.CoupAttempted}");
                 info.Add($"  Successful Ops: {alliance.SuccessfulOperations} | Leak Attempts: {alliance.LeakAttempts}");
+                info.Add($"  Trade Pact: {alliance.TradePact} | Military Pact: {alliance.MilitaryPact}");
+                info.Add($"  Last Interaction: Day {alliance.LastInteractionDay} | Cooldown: {alliance.CooldownDays} days");
+
+                if (alliance.IsOnCooldown())
+                    info.Add("  STATUS: ON COOLDOWN");
 
                 if (alliance.BetrayalRevealed)
                     info.Add("  STATUS: EXPOSED!");
@@ -156,6 +163,16 @@ namespace SecretAlliances
 
                     if (alliance.BribeAmount > 0)
                         info.Add($"  Financial Incentive: {alliance.BribeAmount:F0} denars");
+
+                    if (alliance.TradePact)
+                        info.Add($"  Trade Coordination: Active");
+
+                    if (alliance.MilitaryPact)
+                        info.Add($"  Military Coordination: Active");
+
+                    if (alliance.IsOnCooldown())
+                        info.Add($"  Status: Cooldown ({alliance.CooldownDays} days remaining)");
+
 
                     if (alliance.CoupAttempted)
                         info.Add($"  WARNING: Coup previously attempted!");
@@ -440,6 +457,75 @@ namespace SecretAlliances
             DebugLog($"Calculated player alliance score = {clamped} \n");
 
             return clamped;
+        }
+
+        /// <summary>
+        /// Dump ALL active alliances (player and AI) including GroupId and pact information
+        /// </summary>
+        public static void DumpAllAlliances(SecretAllianceBehavior behavior)
+        {
+            if (behavior == null)
+            {
+                Debug.Print("[Secret Alliances] No behavior available for dumping alliances");
+                return;
+            }
+
+            var alliances = behavior.GetActiveAlliances();
+            if (!alliances.Any())
+            {
+                Debug.Print("[Secret Alliances] No active alliances to dump");
+                return;
+            }
+
+            Debug.Print("=== ALL ACTIVE SECRET ALLIANCES DUMP ===");
+
+            var playerAlliances = alliances.Where(a =>
+                a.InitiatorClanId == Clan.PlayerClan?.Id || a.TargetClanId == Clan.PlayerClan?.Id).ToList();
+            var aiAlliances = alliances.Where(a =>
+                a.InitiatorClanId != Clan.PlayerClan?.Id && a.TargetClanId != Clan.PlayerClan?.Id).ToList();
+
+            Debug.Print($"Total Alliances: {alliances.Count} (Player: {playerAlliances.Count}, AI: {aiAlliances.Count})");
+
+            // Group by GroupId for coalition analysis
+            var coalitions = alliances.GroupBy(a => a.GroupId).Where(g => g.Count() > 1).ToList();
+            if (coalitions.Any())
+            {
+                Debug.Print($"Active Coalitions: {coalitions.Count()}");
+                foreach (var coalition in coalitions)
+                {
+                    Debug.Print($"  Coalition GroupId {coalition.Key}: {coalition.Count()} alliances");
+                }
+            }
+
+            Debug.Print("\n--- PLAYER ALLIANCES ---");
+            foreach (var alliance in playerAlliances)
+            {
+                DumpSingleAlliance(alliance);
+            }
+
+            Debug.Print("\n--- AI ALLIANCES ---");
+            foreach (var alliance in aiAlliances)
+            {
+                DumpSingleAlliance(alliance);
+            }
+
+            Debug.Print("=== END ALLIANCE DUMP ===");
+        }
+
+        private static void DumpSingleAlliance(SecretAllianceRecord alliance)
+        {
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator == null || target == null) return;
+
+            Debug.Print($"  {initiator.Name} <-> {target.Name}");
+            Debug.Print($"    GroupId: {alliance.GroupId} | Strength: {alliance.Strength:F2} | Secrecy: {alliance.Secrecy:F2}");
+            Debug.Print($"    Trade Pact: {alliance.TradePact} | Military Pact: {alliance.MilitaryPact}");
+            Debug.Print($"    Trust: {alliance.TrustLevel:F2} | Bribe: {alliance.BribeAmount:F0}");
+            Debug.Print($"    Successful Ops: {alliance.SuccessfulOperations} | Leaks: {alliance.LeakAttempts}");
+            if (alliance.BetrayalRevealed)
+                Debug.Print($"    STATUS: EXPOSED!");
         }
     }
 }

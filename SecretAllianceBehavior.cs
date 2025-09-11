@@ -19,7 +19,8 @@ namespace SecretAlliances
     {
         private List<SecretAllianceRecord> _alliances = new List<SecretAllianceRecord>();
         private List<AllianceIntelligence> _intelligence = new List<AllianceIntelligence>();
-        private readonly Random _rng = new Random();
+        
+        private int _nextGroupId = 1; // For coalition support
 
         // Constants for tuning
         private const float DAILY_SECRECY_DECAY = 0.002f;
@@ -57,6 +58,7 @@ namespace SecretAlliances
         {
             dataStore.SyncData("SecretAlliances_Alliances", ref _alliances);
             dataStore.SyncData("SecretAlliances_Intelligence", ref _intelligence);
+            dataStore.SyncData("SecretAlliances_NextGroupId", ref _nextGroupId);
         }
 
         private void OnDailyTickClan(Clan clan)
@@ -71,15 +73,25 @@ namespace SecretAlliances
             foreach (var alliance in relevantAlliances)
             {
                 EvaluateAlliance(alliance);
+
+                // Process pact effects
+                ProcessTradePactEffects(alliance);
+                ProcessMilitaryPactEffects(alliance);
+
+                // Age cooldown per alliance
+                if (alliance.CooldownDays > 0)
+                {
+                    alliance.CooldownDays--;
+                }
             }
 
-            // Check for new alliance opportunities
-            if (_rng.NextDouble() < 0.1f) // 10% chance daily to consider new alliances
+            // Check for new alliance opportunities (AI consideration)
+            if (MBRandom.RandomFloat < 0.1f)
             {
                 ConsiderNewAlliances(clan);
             }
 
-            // Process intelligence aging
+            // Process intelligence aging daily
             ProcessIntelligence();
         }
 
@@ -141,7 +153,16 @@ namespace SecretAlliances
                 if (traits.Generosity > 0) secrecyLoss += traits.Generosity * 0.0005f; // Generous leaders may talk too much
             }
 
+            if (alliance.MilitaryPact)
+            {
+                secrecyLoss += 0.001f;
+            }
+
             alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
+
+            if (alliance.TradePact) secrecyLoss += 0.0005f;
+            if (alliance.MilitaryPact) secrecyLoss += 0.001f;
+
         }
 
         private void UpdateAllianceStrength(SecretAllianceRecord alliance)
@@ -180,9 +201,21 @@ namespace SecretAlliances
                 strengthGain *= (1f + alliance.SuccessfulOperations * 0.1f);
             }
 
+            if (alliance.MilitaryPact)
+            {
+                strengthGain *= 1.5f;
+            }
+
+
             // Political pressure can drive clans together
             float politicalPressure = CalculatePoliticalPressure(initiator, target);
             strengthGain *= (1f + politicalPressure * 0.2f);
+
+            if (alliance.MilitaryPact)
+            {
+                strengthGain *= 1.2f;
+            }
+
 
             alliance.Strength = MathF.Min(1f, alliance.Strength + strengthGain);
         }
@@ -214,7 +247,10 @@ namespace SecretAlliances
                 leakChance *= MathF.Max(0.5f, 1f - (alliance.DaysWithoutLeak - 30) * 0.01f);
             }
 
-            if (_rng.NextDouble() < leakChance)
+            if (alliance.TradePact) leakChance *= 1.1f;
+            if (alliance.MilitaryPact) leakChance *= 1.15f;
+
+            if (MBRandom.RandomFloat < leakChance)
             {
                 ProcessLeak(alliance, potentialInformants);
             }
@@ -229,7 +265,7 @@ namespace SecretAlliances
             Hero informant = null;
             if (potentialInformants.Any())
             {
-                informant = potentialInformants[_rng.Next(potentialInformants.Count)];
+                informant = potentialInformants[MBRandom.RandomInt(potentialInformants.Count)];
             }
 
             // Determine leak severity based on informant's position and knowledge
@@ -241,7 +277,7 @@ namespace SecretAlliances
             {
                 var intel = new AllianceIntelligence
                 {
-                    AllianceId = alliance.InitiatorClanId, // Using as unique identifier
+                    AllianceId = alliance.UniqueId, // Using unique identifier
                     InformerHeroId = informant.Id,
                     ReliabilityScore = CalculateInformerReliability(informant),
                     DaysOld = 0,
@@ -249,6 +285,8 @@ namespace SecretAlliances
                     SeverityLevel = severity
                 };
                 _intelligence.Add(intel);
+
+                Debug.Print($"[Secret Alliances] Intelligence leaked by {informant.Name} (Reliability: {intel.ReliabilityScore:F2}, Severity: {severity:F2})");
             }
 
             // Apply consequences
@@ -279,7 +317,7 @@ namespace SecretAlliances
             // Calculate coup probability
             float coupChance = CalculateCoupProbability(alliance, initiator, target);
 
-            if (_rng.NextDouble() < coupChance)
+            if (MBRandom.RandomFloat < coupChance)
             {
                 AttemptCoup(alliance, initiator, target);
             }
@@ -331,6 +369,11 @@ namespace SecretAlliances
             {
                 baseChance *= 1.3f;
             }
+            // Military pact gives coup bonus
+            if (alliance.MilitaryPact)
+            {
+                baseChance *= 1.15f;
+            }
 
             return MathF.Min(0.3f, baseChance); // Cap at 30%
         }
@@ -349,7 +392,7 @@ namespace SecretAlliances
             // Calculate success probability
             float successChance = CalculateCoupSuccessChance(alliance, initiator, target);
 
-            if (_rng.NextDouble() < successChance)
+            if (MBRandom.RandomFloat < successChance)
             {
                 // Successful coup
                 ExecuteSuccessfulCoup(alliance, initiator, target, currentRuler);
@@ -368,7 +411,7 @@ namespace SecretAlliances
             // Determine coup type based on strength and circumstances
             float coupSeverity = alliance.Strength + (1f - alliance.Secrecy);
 
-            if (coupSeverity > 1.5f && _rng.NextDouble() < 0.7f)
+            if (coupSeverity > 1.5f && MBRandom.RandomFloat < 0.7f)
             {
                 // Assassination coup - ruler is killed
                 var executor = GetBestExecutor(initiator, target);
@@ -383,7 +426,7 @@ namespace SecretAlliances
                 ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(initiator, true);
 
                 // Target clan might follow
-                if (alliance.TrustLevel > 0.7f && _rng.NextDouble() < 0.6f)
+                if (alliance.TrustLevel > 0.7f && MBRandom.RandomFloat < 0.6f)
                 {
                     ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(target, true);
                 }
@@ -427,11 +470,11 @@ namespace SecretAlliances
             }
 
             // Possible exile or punishment
-            if (_rng.NextDouble() < 0.3f) // 30% chance of harsh punishment
+            if (MBRandom.RandomFloat < 0.3f) // 30% chance of harsh punishment
             {
                 ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(initiator, true);
             }
-            else if (_rng.NextDouble() < 0.2f) // 20% chance target is also punished
+            else if (MBRandom.RandomFloat < 0.2f) // 20% chance target is also punished
             {
                 if (target.Kingdom == initiator.Kingdom)
                 {
@@ -441,6 +484,57 @@ namespace SecretAlliances
         }
 
         // Helper Methods
+
+        private void ProcessTradePactEffects(SecretAllianceRecord alliance)
+        {
+            if (!alliance.TradePact || !alliance.IsActive) return;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator?.Leader == null || target?.Leader == null) return;
+
+            // Calculate daily gold transfer based on EconomicIncentive and TrustLevel
+            int baseAmount = MBRandom.RandomInt(25, 150);
+            float multiplier = alliance.EconomicIncentive * alliance.TrustLevel;
+            int transferAmount = (int)(baseAmount * multiplier);
+
+            if (transferAmount < 5) return; // Skip very small amounts
+
+            // Transfer from richer to poorer clan
+            Hero richer, poorer;
+            if (initiator.Gold > target.Gold)
+            {
+                richer = initiator.Leader;
+                poorer = target.Leader;
+            }
+            else
+            {
+                richer = target.Leader;
+                poorer = initiator.Leader;
+            }
+
+            // Only transfer if the richer clan can afford it
+            if (richer.Gold >= transferAmount)
+            {
+                GiveGoldAction.ApplyBetweenCharacters(richer, poorer, transferAmount, false);
+
+                // Secrecy decays slightly due to trade activities
+                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.001f);
+
+                Debug.Print($"[Secret Alliances] Trade Pact: {richer.Name} transferred {transferAmount} denars to {poorer.Name} (Alliance GroupId: {alliance.GroupId})");
+            }
+        }
+
+        private void ProcessMilitaryPactEffects(SecretAllianceRecord alliance)
+        {
+            if (!alliance.MilitaryPact || !alliance.IsActive) return;
+
+            Debug.Print($"[Secret Alliances] Military Pact active for alliance GroupId {alliance.GroupId} - enhanced strength growth and coordination");
+
+            // Military pacts are handled in UpdateAllianceStrength (1.5x multiplier) and UpdateAllianceSecrecy (additional decay)
+        }
+
         private bool AreClansInConflictingSituations(Clan clan1, Clan clan2)
         {
             if (clan1.Kingdom == null || clan2.Kingdom == null) return false;
@@ -549,7 +643,7 @@ namespace SecretAlliances
                 // Low trust in alliance increases chance
                 informantChance += (1f - alliance.TrustLevel) * 0.2f;
 
-                if (_rng.NextDouble() < informantChance)
+                if (MBRandom.RandomFloat < informantChance)
                 {
                     informants.Add(hero);
                 }
@@ -676,10 +770,11 @@ namespace SecretAlliances
             {
                 float allianceDesirability = CalculateAllianceDesirability(clan, target);
 
-                if (allianceDesirability > 0.6f && _rng.NextDouble() < allianceDesirability * 0.1f)
+                if (allianceDesirability > 0.6f && MBRandom.RandomFloat < allianceDesirability * 0.1f)
                 {
                     // AI-initiated alliance
                     CreateAllianceAI(clan, target, allianceDesirability);
+                    Debug.Print($"[Secret Alliances] AI-initiated alliance: {clan.Name} -> {target.Name} (desirability: {allianceDesirability:F2})");
                 }
             }
         }
@@ -751,17 +846,18 @@ namespace SecretAlliances
 
         private void CreateAllianceAI(Clan initiator, Clan target, float desirability)
         {
-            float initialSecrecy = 0.7f + (_rng.NextFloat() * 0.2f); // 0.7-0.9
+            float initialSecrecy = 0.7f + (MBRandom.RandomFloat * 0.2f); // 0.7-0.9
             float initialStrength = 0.05f + (desirability * 0.15f); // 0.05-0.2
 
             // Calculate potential bribe based on desperation and wealth
             float bribeAmount = 0f;
             if (desirability > 0.8f && initiator.Gold > 10000)
             {
-                bribeAmount = _rng.Next(1000, Math.Min(5000, initiator.Gold / 4));
+                bribeAmount = MBRandom.RandomInt(1000, Math.Min(5000, initiator.Gold / 4));
             }
 
             CreateAlliance(initiator, target, initialSecrecy, initialStrength, bribeAmount);
+            Debug.Print($"[Secret Alliances] AI alliance created: {initiator.Name} -> {target.Name}, strength: {initialStrength:F2}, secrecy: {initialSecrecy:F2}");
         }
 
         private bool HasExistingAlliance(Clan clan1, Clan clan2)
@@ -954,6 +1050,8 @@ namespace SecretAlliances
         // Event Handlers
         private void OnBattleStarted(MapEvent mapEvent, PartyBase attackerParty, PartyBase defenderParty)
         {
+            // Evaluate potential betrayals before battle
+            EvaluatePreBattleBetrayals(mapEvent);
             // Battles affect alliance considerations
             var attackerClan = attackerParty?.LeaderHero?.Clan;
             var defenderClan = defenderParty?.LeaderHero?.Clan;
@@ -975,6 +1073,151 @@ namespace SecretAlliances
                 }
             }
         }
+
+        private void EvaluatePreBattleBetrayals(MapEvent mapEvent)
+        {
+            if (mapEvent == null) return;
+
+            // Get all parties involved in the battle
+            var attackerParties = mapEvent?.AttackerSide?.Parties != null
+    ? mapEvent.AttackerSide.Parties.Select(p => p.Party).Where(p => p != null).ToList()
+    : new List<PartyBase>();
+
+            var defenderParties = mapEvent?.DefenderSide?.Parties != null
+                ? mapEvent.DefenderSide.Parties.Select(p => p.Party).Where(p => p != null).ToList()
+                : new List<PartyBase>();
+
+            // Check each side for potential defectors
+            EvaluateSideDefections(mapEvent, attackerParties, defenderParties);
+            EvaluateSideDefections(mapEvent, defenderParties, attackerParties);
+        }
+
+        private void EvaluateSideDefections(MapEvent mapEvent, List<PartyBase> sidePaties, List<PartyBase> opposingParties)
+        {
+            foreach (var party in sidePaties)
+            {
+                var sideClan = party?.LeaderHero?.Clan;
+                if (sideClan == null || sideClan.Leader == null) continue;
+
+                foreach (var opposingParty in opposingParties)
+                {
+                    var opposingClan = opposingParty?.LeaderHero?.Clan;
+                    if (opposingClan == null) continue;
+
+                    // Check if there's a secret alliance between these clans
+                    var alliance = FindAlliance(sideClan, opposingClan);
+                    if (alliance != null && alliance.IsActive)
+                    {
+                        var relevantAlliances = new List<SecretAllianceRecord> { alliance };
+
+                        // Also check for shared group alliances
+                        var sideAlliances = GetAlliancesForClan(sideClan);
+                        var opposingAlliances = GetAlliancesForClan(opposingClan);
+
+                        var sharedGroupAlliances = sideAlliances.Where(a =>
+                            opposingAlliances.Any(o => o.GroupId == a.GroupId && a.GroupId != 0)).ToList();
+
+                        relevantAlliances.AddRange(sharedGroupAlliances);
+
+                        if (EvaluateSideDefection(mapEvent, sideClan, opposingClan, relevantAlliances))
+                        {
+                            // Execute defection (leave with rebellion to simulate switching sides)
+                            if (sideClan.Kingdom != null)
+                            {
+                                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(sideClan, false);
+
+                                // Apply consequences
+                                foreach (var relevantAlliance in relevantAlliances)
+                                {
+                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.3f);
+                                    relevantAlliance.TrustLevel = MathF.Max(0f, relevantAlliance.TrustLevel - 0.2f);
+                                    relevantAlliance.BetrayalRevealed = true;
+                                }
+
+                                Debug.Print($"[Secret Alliances] Pre-battle defection: {sideClan.Name} switched sides due to secret alliance with {opposingClan.Name}");
+                            }
+                            return; // Only one defection per evaluation
+                        }
+                    }
+                }
+            }
+        }
+
+        private static float ComputeMapEventSideStrength(MapEventSide side)
+        {
+            if (side == null || side.Parties == null || side.Parties.Count == 0)
+                return 1f;
+
+            float sum = 0f;
+            for (int i = 0; i < side.Parties.Count; i++)
+            {
+                var mep = side.Parties[i];         // MapEventParty
+                var party = mep?.Party;            // PartyBase
+                if (party != null)
+                    sum += MathF.Max(0f, party.TotalStrength);
+            }
+            // Avoid zero to prevent divide-by-zero elsewhere
+            return MathF.Max(1f, sum);
+        }
+
+        private bool EvaluateSideDefection(MapEvent mapEvent, Clan sideClan, Clan opposingClan, List<SecretAllianceRecord> relevantAlliances)
+        {
+            float defectionProbability = 0.05f; // Base 5% chance
+
+            foreach (var alliance in relevantAlliances)
+            {
+                // Alliance strength increases defection chance
+                defectionProbability += alliance.Strength * 0.3f;
+
+                // Trust level affects loyalty
+                defectionProbability += alliance.TrustLevel * 0.2f;
+
+                // Military pact makes defection more likely
+                if (alliance.MilitaryPact)
+                {
+                    defectionProbability += 0.15f;
+                }
+            }
+
+            // Political pressure increases defection likelihood
+            float pressure = CalculatePoliticalPressure(sideClan, opposingClan);
+            defectionProbability += pressure * 0.2f;
+
+            // Desperation increases defection chance
+            float desperation = CalculateDesperationLevel(sideClan);
+            defectionProbability += desperation * 0.25f;
+
+            // Relative battlefield power affects decision
+            try
+            {
+                float sideStrength = ComputeMapEventSideStrength(mapEvent?.AttackerSide);
+                float opposingStrength = ComputeMapEventSideStrength(mapEvent?.DefenderSide);
+
+                // If the side they're considering switching to is much stronger
+                if (opposingStrength > sideStrength * 1.5f)
+                {
+                    defectionProbability += 0.1f;
+                }
+            }
+            catch
+            {
+                // Fallback if battle strength calculation fails
+                defectionProbability += 0.05f;
+            }
+
+            // Cap the probability
+            defectionProbability = MathF.Min(0.4f, defectionProbability);
+
+            bool shouldDefect = MBRandom.RandomFloat < defectionProbability;
+
+            if (shouldDefect)
+            {
+                Debug.Print($"[Secret Alliances] Defection probability for {sideClan.Name}: {defectionProbability:F3} - DEFECTING");
+            }
+
+            return shouldDefect;
+        }
+
 
         private void OnBattleEnded(MapEvent mapEvent)
         {
@@ -1001,6 +1244,106 @@ namespace SecretAlliances
                     }
                 }
             }
+        }
+
+        public int GetAcceptanceScore(Clan proposer, Clan target)
+        {
+            if (proposer == null || target == null) return 0;
+
+            int score = 50; // Base 50% chance
+
+            // Relationship factor (most important)
+            if (target.Leader != null && proposer.Leader != null)
+            {
+                int relation = target.Leader.GetRelation(proposer.Leader);
+                score += relation / 2; // Each relation point = 0.5% acceptance
+            }
+
+            // Economic factors
+            if (proposer.Gold > target.Gold * 1.5f)
+            {
+                score += 10; // Proposer is wealthy
+            }
+            else if (proposer.Gold < target.Gold * 0.5f)
+            {
+                score -= 10; // Proposer is poor
+            }
+
+            // Military strength comparison
+            float strengthRatio = proposer.TotalStrength / MathF.Max(1f, target.TotalStrength);
+            if (strengthRatio > 1.5f)
+            {
+                score += 15; // Proposer is much stronger
+            }
+            else if (strengthRatio < 0.5f)
+            {
+                score -= 10; // Proposer is much weaker
+            }
+
+            // Political situation
+            if (proposer.Kingdom != null && target.Kingdom != null)
+            {
+                if (proposer.Kingdom.IsAtWarWith(target.Kingdom))
+                {
+                    score -= 30; // Much harder if at war
+                }
+                else if (proposer.Kingdom == target.Kingdom)
+                {
+                    score += 10; // Easier if same kingdom
+                }
+            }
+
+            // Target clan's current situation (desperation)
+            if (target.Gold < 2000)
+            {
+                score += 15; // Desperate for resources
+            }
+
+            if (target.TotalStrength < 100f)
+            {
+                score += 10; // Militarily weak, needs allies
+            }
+
+            // Leader personality traits
+            if (target.Leader != null)
+            {
+                var traits = target.Leader.GetHeroTraits();
+                score += traits.Calculating * 5; // Calculating leaders more likely to accept
+                score -= traits.Honor * 3; // Honorable leaders less likely
+                score += traits.Valor * 2; // Brave leaders more willing to take risks
+            }
+
+            // Proposer's reputation and skills
+            if (proposer.Leader != null)
+            {
+                int leadership = proposer.Leader.GetSkillValue(DefaultSkills.Leadership);
+                int charm = proposer.Leader.GetSkillValue(DefaultSkills.Charm);
+                int roguery = proposer.Leader.GetSkillValue(DefaultSkills.Roguery);
+                score += (leadership + charm + roguery) / 10; // Skills help persuasion
+            }
+
+            // Geographic factors
+            float distance = GetClanDistance(proposer, target);
+            if (distance < 100f)
+            {
+                score += 5; // Close clans easier to coordinate
+            }
+
+            // Political pressure (settlements under siege, low influence)
+            if (target.Kingdom != null && target.Kingdom.Settlements.Any(s => s.IsUnderSiege))
+            {
+                score += 20; // Under pressure
+            }
+
+            if (target.Influence < 20f)
+            {
+                score += 10; // Low influence creates desperation
+            }
+
+            // Random factor for unpredictability (bounded)
+            score += MBRandom.RandomInt(-10, 10);
+
+            return MathF.Max(0, MathF.Min(100, score));
         }
 
         private void OnClanChangedKingdom(Clan clan, Kingdom oldKingdom, Kingdom newKingdom, ChangeKingdomAction.ChangeKingdomActionDetail detail, bool showNotification)
@@ -1112,13 +1455,22 @@ namespace SecretAlliances
 
         // Public interface methods
         public void CreateAlliance(Clan initiator, Clan target, float initialSecrecy = 0.8f,
-            float initialStrength = 0.1f, float bribe = 0f)
+            float initialStrength = 0.1f, float bribe = 0f, int groupId = 0)
         {
             if (initiator == null || target == null || HasExistingAlliance(initiator, target))
                 return;
 
+            // Assign group ID - if not provided, create new group
+            int allianceGroupId = groupId;
+            if (allianceGroupId == 0)
+            {
+                allianceGroupId = _nextGroupId++;
+            }
+
+
             var alliance = new SecretAllianceRecord
             {
+                
                 InitiatorClanId = initiator.Id,
                 TargetClanId = target.Id,
                 Secrecy = initialSecrecy,
@@ -1126,17 +1478,51 @@ namespace SecretAlliances
                 BribeAmount = bribe,
                 IsActive = true,
                 CreatedGameDay = CampaignTime.Now.GetDayOfYear,
+                LastInteractionDay = CampaignTime.Now.GetDayOfYear,
+                CooldownDays = 5,
+                TradePact = false,
+                MilitaryPact = false,
                 TrustLevel = 0.5f,
-                RiskTolerance = _rng.NextFloat(),
+                RiskTolerance = MBRandom.RandomFloat,
                 EconomicIncentive = CalculateMutualBenefit(initiator, target),
                 PoliticalPressure = CalculatePoliticalPressure(initiator, target),
                 MilitaryAdvantage = (initiator.TotalStrength + target.TotalStrength) /
                                    MathF.Max(1f, initiator.Kingdom?.TotalStrength ?? 1f),
-                HasCommonEnemies = HasCommonEnemies(initiator, target)
+                HasCommonEnemies = HasCommonEnemies(initiator, target),
+                GroupId = allianceGroupId,
+                
+                
             };
 
             _alliances.Add(alliance);
+            Debug.Print($"[Secret Alliances] New alliance created: {initiator.Name} <-> {target.Name}, GroupId: {allianceGroupId}");
         }
+
+        public bool TryRecruitClanToGroup(Clan recruiter, Clan candidate)
+        {
+            if (recruiter == null || candidate == null) return false;
+
+            // Find recruiter's group ID
+            var recruiterAlliance = GetAlliancesForClan(recruiter).FirstOrDefault();
+            if (recruiterAlliance == null) return false;
+
+            int groupId = recruiterAlliance.GroupId;
+
+            // Check acceptance and desirability
+            int acceptanceScore = GetAcceptanceScore(recruiter, candidate);
+            if (acceptanceScore < 60) return false; // Lower threshold for group recruitment
+
+            // Don't recruit if candidate already has alliances
+            if (GetAlliancesForClan(candidate).Any()) return false;
+
+            // Create alliance with the same group ID
+            CreateAlliance(recruiter, candidate, groupId: groupId);
+
+            Debug.Print($"[Secret Alliances] Clan {candidate.Name} recruited to coalition GroupId: {groupId}");
+            return true;
+        }
+
+
 
         public List<SecretAllianceRecord> GetActiveAlliances()
         {
@@ -1163,6 +1549,95 @@ namespace SecretAlliances
         public List<AllianceIntelligence> GetIntelligence()
         {
             return _intelligence.ToList();
+        }
+
+        public bool TrySetTradePact(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
+                return false;
+
+            alliance.TradePact = true;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+            alliance.CooldownDays = 5;
+            alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.05f);
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.02f);
+
+            return true;
+        }
+
+        public bool TrySetMilitaryPact(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive || alliance.IsOnCooldown())
+                return false;
+
+            alliance.MilitaryPact = true;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+            alliance.CooldownDays = 7;
+            alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel + 0.08f);
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.05f);
+
+            return true;
+        }
+
+        public bool TryDissolveAlliance(Clan clanA, Clan clanB, bool blamePlayer)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive)
+                return false;
+
+            alliance.IsActive = false;
+            alliance.LastInteractionDay = CampaignTime.Now.GetDayOfYear;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator?.Leader != null && target?.Leader != null)
+            {
+                if (blamePlayer)
+                {
+                    // Player gets blamed more
+                    if (Clan.PlayerClan == initiator)
+                    {
+                        ChangeRelationAction.ApplyPlayerRelation(target.Leader, -15, true, false);
+                        ChangeClanInfluenceAction.Apply(initiator, -20f);
+                    }
+                    else if (Clan.PlayerClan == target)
+                    {
+                        ChangeRelationAction.ApplyPlayerRelation(initiator.Leader, -15, true, false);
+                        ChangeClanInfluenceAction.Apply(target, -20f);
+                    }
+                }
+                else
+                {
+                    // Mutual smaller hit
+                    ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, target.Leader, -5);
+                    ChangeClanInfluenceAction.Apply(initiator, -10f);
+                    ChangeClanInfluenceAction.Apply(target, -10f);
+                }
+            }
+
+            return true;
+        }
+        public bool TryGetRumorsForHero(Hero hero, out string rumorSummary)
+        {
+            rumorSummary = "";
+            if (hero?.Clan == null) return false;
+
+            // Check if this hero might know about alliances
+            var relevantIntel = _intelligence.Where(i =>
+                i.ReliabilityScore > 0.3f &&
+                i.DaysOld < 45 &&
+                (i.GetInformer()?.Clan == hero.Clan || i.AllianceId == hero.Clan.Id)).ToList();
+
+            if (!relevantIntel.Any()) return false;
+
+            var intel = relevantIntel.First();
+            rumorSummary = $"There are whispers of secret dealings... (Reliability: {intel.ReliabilityScore:F1}, Age: {intel.DaysOld} days)";
+
+            Debug.Print($"[Secret Alliances] Rumors shared by {hero.Name}: {rumorSummary}");
+            return true;
         }
     }
 }
