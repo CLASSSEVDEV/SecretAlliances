@@ -32,6 +32,9 @@ namespace SecretAlliances
                 _allianceBehavior = new SecretAllianceBehavior();
                 campaignStarter.AddBehavior(_allianceBehavior);
 
+                // Register console commands for debugging
+                ConsoleCommands.RegisterCommands();
+
                 
 
                 // Register dialog lines for secret alliance system

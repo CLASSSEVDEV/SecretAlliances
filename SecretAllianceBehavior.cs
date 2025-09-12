@@ -294,6 +294,406 @@ namespace SecretAlliances
 
         #endregion
 
+        #region Operations Framework
+
+        private void ProcessOperationsDaily(Clan clan)
+        {
+            // Process operations for alliances involving this clan
+            var relevantAlliances = _alliances.Where(a =>
+                a.IsActive &&
+                (a.InitiatorClanId == clan.Id || a.TargetClanId == clan.Id)).ToList();
+
+            foreach (var alliance in relevantAlliances)
+            {
+                EvaluateAndExecuteOperations(alliance);
+            }
+        }
+
+        private void EvaluateAndExecuteOperations(SecretAllianceRecord alliance)
+        {
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            
+            // Check if operation is eligible
+            if (currentDay < alliance.NextEligibleOperationDay) return;
+
+            // Adjust interval based on conditions
+            int baseInterval = Config.OperationIntervalDays;
+            if (alliance.PoliticalPressure > 0.6f || alliance.TrustLevel > 0.75f)
+            {
+                baseInterval = Math.Max(Config.OperationAdaptiveMinDays, baseInterval - 5);
+            }
+
+            // Roll for operation
+            if (MBRandom.RandomFloat < 0.4f) // 40% chance per eligible day
+            {
+                ExecuteRandomOperation(alliance);
+                alliance.NextEligibleOperationDay = currentDay + baseInterval + MBRandom.RandomInt(-2, 3);
+            }
+        }
+
+        private void ExecuteRandomOperation(SecretAllianceRecord alliance)
+        {
+            // Check cooldowns
+            if (!_operationCooldowns.ContainsKey(alliance.UniqueId))
+            {
+                _operationCooldowns[alliance.UniqueId] = new Dictionary<int, int>();
+            }
+
+            var cooldowns = _operationCooldowns[alliance.UniqueId];
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            
+            // Filter available operations by cooldown
+            var availableOps = new List<OperationType>();
+            if (!cooldowns.ContainsKey(1) || cooldowns[1] <= currentDay) availableOps.Add(OperationType.CovertAid);
+            if (!cooldowns.ContainsKey(2) || cooldowns[2] <= currentDay) availableOps.Add(OperationType.SpyProbe);
+            if (!cooldowns.ContainsKey(3) || cooldowns[3] <= currentDay) availableOps.Add(OperationType.RecruitmentFeelers);
+            if (!cooldowns.ContainsKey(4) || cooldowns[4] <= currentDay) availableOps.Add(OperationType.SabotageRaid);
+            if (!cooldowns.ContainsKey(5) || cooldowns[5] <= currentDay) availableOps.Add(OperationType.CounterIntelligence);
+
+            if (!availableOps.Any()) return;
+
+            // Select operation type (weighted by alliance characteristics)
+            OperationType selectedOp = SelectOperationByWeight(alliance, availableOps);
+            
+            ExecuteOperation(alliance, selectedOp);
+        }
+
+        private OperationType SelectOperationByWeight(SecretAllianceRecord alliance, List<OperationType> availableOps)
+        {
+            // Weight operations based on alliance state
+            var weights = new Dictionary<OperationType, float>();
+            
+            foreach (var op in availableOps)
+            {
+                weights[op] = op switch
+                {
+                    OperationType.CovertAid => 0.3f + (alliance.TrustLevel * 0.2f),
+                    OperationType.SpyProbe => 0.25f + (alliance.PoliticalPressure * 0.15f),
+                    OperationType.RecruitmentFeelers => 0.15f + (alliance.Strength * 0.1f),
+                    OperationType.SabotageRaid => 0.2f + ((1f - alliance.Secrecy) * 0.1f),
+                    OperationType.CounterIntelligence => 0.1f + (alliance.LeakAttempts * 0.05f),
+                    _ => 0.1f
+                };
+            }
+
+            float totalWeight = weights.Values.Sum();
+            float roll = MBRandom.RandomFloat * totalWeight;
+            float current = 0f;
+
+            foreach (var kvp in weights)
+            {
+                current += kvp.Value;
+                if (roll <= current)
+                {
+                    return kvp.Key;
+                }
+            }
+
+            return availableOps.FirstOrDefault();
+        }
+
+        private void ExecuteOperation(SecretAllianceRecord alliance, OperationType operationType)
+        {
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            bool success = RollOperationSuccess(alliance, operationType);
+            
+            // Set cooldown
+            if (!_operationCooldowns.ContainsKey(alliance.UniqueId))
+            {
+                _operationCooldowns[alliance.UniqueId] = new Dictionary<int, int>();
+            }
+
+            var cooldowns = _operationCooldowns[alliance.UniqueId];
+            cooldowns[(int)operationType] = currentDay + GetOperationCooldown(operationType);
+
+            // Execute operation effects
+            switch (operationType)
+            {
+                case OperationType.CovertAid:
+                    ExecuteCovertAid(alliance, success);
+                    break;
+                case OperationType.SpyProbe:
+                    ExecuteSpyProbe(alliance, success);
+                    break;
+                case OperationType.RecruitmentFeelers:
+                    ExecuteRecruitmentFeelers(alliance, success);
+                    break;
+                case OperationType.SabotageRaid:
+                    ExecuteSabotageRaid(alliance, success);
+                    break;
+                case OperationType.CounterIntelligence:
+                    ExecuteCounterIntelligence(alliance, success);
+                    break;
+            }
+
+            if (success)
+            {
+                alliance.SuccessfulOperations++;
+            }
+            else
+            {
+                // Apply failure penalties
+                ApplyOperationFailure(alliance, operationType);
+            }
+
+            if (Config.DebugVerbose)
+            {
+                Debug.Print($"[SecretAlliances] Operation {operationType} executed for alliance " +
+                          $"{alliance.GetInitiatorClan()?.Name} <-> {alliance.GetTargetClan()?.Name} " +
+                          $"(Success: {success})");
+            }
+        }
+
+        private bool RollOperationSuccess(SecretAllianceRecord alliance, OperationType operationType)
+        {
+            float difficulty = operationType switch
+            {
+                OperationType.CovertAid => 0.2f,
+                OperationType.SpyProbe => 0.4f,
+                OperationType.RecruitmentFeelers => 0.45f,
+                OperationType.SabotageRaid => 0.7f,
+                OperationType.CounterIntelligence => 0.3f,
+                _ => 0.5f
+            };
+
+            float successChance = alliance.TrustLevel * 0.4f + alliance.Strength * 0.4f + MBRandom.RandomFloat * 0.2f;
+            
+            // Add leader cunning bonus if available
+            var initiator = alliance.GetInitiatorClan();
+            if (initiator?.Leader != null)
+            {
+                successChance += initiator.Leader.GetAttributeValue(DefaultCharacterAttributes.Cunning) / 200f;
+            }
+
+            return successChance > difficulty;
+        }
+
+        private int GetOperationCooldown(OperationType operationType)
+        {
+            return operationType switch
+            {
+                OperationType.CovertAid => 15,
+                OperationType.SpyProbe => Config.SpyProbeCooldownDays,
+                OperationType.RecruitmentFeelers => Config.RecruitmentCooldownDays,
+                OperationType.SabotageRaid => Config.SabotageCooldownDays,
+                OperationType.CounterIntelligence => Config.CounterIntelCooldownDays,
+                _ => 20
+            };
+        }
+
+        private void ExecuteCovertAid(SecretAllianceRecord alliance, bool success)
+        {
+            if (success)
+            {
+                alliance.Strength += MBRandom.RandomFloatRanged(0.01f, 0.03f);
+                alliance.TrustLevel += MBRandom.RandomFloatRanged(0.01f, 0.02f);
+                alliance.Secrecy -= MBRandom.RandomFloatRanged(0.005f, 0.015f);
+                
+                // Clamp values
+                alliance.Strength = MathF.Min(1f, alliance.Strength);
+                alliance.TrustLevel = MathF.Min(1f, alliance.TrustLevel);
+                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy);
+            }
+        }
+
+        private void ExecuteSpyProbe(SecretAllianceRecord alliance, bool success)
+        {
+            if (success)
+            {
+                // Create intelligence about a third clan
+                var targetClan = FindSpyTarget(alliance);
+                if (targetClan != null)
+                {
+                    CreateSpyIntelligence(alliance, targetClan);
+                }
+            }
+            else
+            {
+                // Failure increases leak chance
+                CheckForLeaks(alliance, 2.0f); // Double leak chance
+                alliance.Secrecy -= MBRandom.RandomFloatRanged(0.02f, 0.04f);
+                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy);
+            }
+        }
+
+        private void ExecuteRecruitmentFeelers(SecretAllianceRecord alliance, bool success)
+        {
+            if (success)
+            {
+                var candidate = FindRecruitmentCandidate(alliance);
+                if (candidate != null && MBRandom.RandomFloat < CalculateRecruitmentSuccessChance(alliance, candidate))
+                {
+                    CreateRecruitedAlliance(alliance, candidate);
+                }
+            }
+        }
+
+        private void ExecuteSabotageRaid(SecretAllianceRecord alliance, bool success)
+        {
+            if (success)
+            {
+                var targetClan = FindSabotageTarget(alliance);
+                if (targetClan != null)
+                {
+                    // Log virtual impact and create high-severity intel
+                    CreateSabotageIntelligence(alliance, targetClan);
+                    
+                    if (Config.DebugVerbose)
+                    {
+                        Debug.Print($"[SecretAlliances] Sabotage executed against {targetClan.Name}");
+                    }
+                }
+            }
+            else
+            {
+                // High failure chance generates leak
+                if (MBRandom.RandomFloat < 0.3f)
+                {
+                    CheckForLeaks(alliance, 3.0f); // Triple leak chance
+                }
+                alliance.Secrecy -= MBRandom.RandomFloatRanged(0.03f, 0.08f);
+                alliance.Secrecy = MathF.Max(0f, alliance.Secrecy);
+            }
+        }
+
+        private void ExecuteCounterIntelligence(SecretAllianceRecord alliance, bool success)
+        {
+            if (success)
+            {
+                // Reduce existing intelligence reliability
+                var relevantIntel = _intelligence.Where(i => i.AllianceId == alliance.UniqueId).ToList();
+                foreach (var intel in relevantIntel)
+                {
+                    intel.ReliabilityScore = MathF.Max(0f, intel.ReliabilityScore - MBRandom.RandomFloatRanged(0.1f, 0.3f));
+                }
+
+                // Set counter-intel buff
+                alliance.CounterIntelBuffExpiryDay = CampaignTime.Now.GetDayOfYear + 30;
+                
+                Debug.Print($"[SecretAlliances] Counter-intelligence operation reduced {relevantIntel.Count} intel records");
+            }
+        }
+
+        private void ApplyOperationFailure(SecretAllianceRecord alliance, OperationType operationType)
+        {
+            float secrecyLoss = operationType switch
+            {
+                OperationType.CovertAid => MBRandom.RandomFloatRanged(0.01f, 0.02f),
+                OperationType.SpyProbe => MBRandom.RandomFloatRanged(0.02f, 0.04f),
+                OperationType.RecruitmentFeelers => MBRandom.RandomFloatRanged(0.015f, 0.03f),
+                OperationType.SabotageRaid => MBRandom.RandomFloatRanged(0.03f, 0.08f),
+                OperationType.CounterIntelligence => MBRandom.RandomFloatRanged(0.01f, 0.025f),
+                _ => 0.02f
+            };
+
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - secrecyLoss);
+        }
+
+        #endregion
+
+        #region Helper Methods for Operations
+
+        private Clan FindSpyTarget(SecretAllianceRecord alliance)
+        {
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+            
+            if (initiator?.Kingdom == null) return null;
+
+            // Prefer enemies or neutrals
+            var candidates = Clan.All.Where(c => 
+                c != initiator && 
+                c != target && 
+                !c.IsEliminated && 
+                !c.IsMinorFaction &&
+                (initiator.Kingdom.IsAtWarWith(c.Kingdom) || c.Kingdom == null)).ToList();
+
+            return candidates.Any() ? candidates[MBRandom.RandomInt(candidates.Count)] : null;
+        }
+
+        private Clan FindRecruitmentCandidate(SecretAllianceRecord alliance)
+        {
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+            
+            // Find clans that complement the alliance's power and have shared interests
+            var candidates = Clan.All.Where(c => 
+                c != initiator && 
+                c != target && 
+                !c.IsEliminated && 
+                !c.IsMinorFaction &&
+                !HasExistingAlliance(initiator, c) &&
+                !HasExistingAlliance(target, c) &&
+                (HasCommonEnemies(initiator, c) || HasCommonEnemies(target, c))).ToList();
+
+            return candidates.Any() ? candidates[MBRandom.RandomInt(candidates.Count)] : null;
+        }
+
+        private Clan FindSabotageTarget(SecretAllianceRecord alliance)
+        {
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+            
+            if (initiator?.Kingdom == null) return null;
+
+            // Target enemy clans
+            var enemies = Clan.All.Where(c => 
+                c != initiator && 
+                c != target && 
+                !c.IsEliminated && 
+                c.Kingdom != null &&
+                (initiator.Kingdom.IsAtWarWith(c.Kingdom) || target.Kingdom?.IsAtWarWith(c.Kingdom) == true)).ToList();
+
+            return enemies.Any() ? enemies[MBRandom.RandomInt(enemies.Count)] : null;
+        }
+
+        private float CalculateRecruitmentSuccessChance(SecretAllianceRecord alliance, Clan candidate)
+        {
+            float baseChance = alliance.Strength * 0.3f;
+            float desperationBonus = CalculateDesperationLevel(candidate) * 0.4f;
+            float trustBonus = alliance.TrustLevel * 0.2f;
+            
+            return MathF.Min(baseChance + desperationBonus + trustBonus, 0.8f);
+        }
+
+        private void CreateRecruitedAlliance(SecretAllianceRecord parentAlliance, Clan newClan)
+        {
+            var initiator = parentAlliance.GetInitiatorClan();
+            if (initiator == null) return;
+
+            var newAlliance = new SecretAllianceRecord
+            {
+                InitiatorClanId = initiator.Id,
+                TargetClanId = newClan.Id,
+                UniqueId = MBObjectManager.Instance.CreateGuid(),
+                IsActive = true,
+                Strength = parentAlliance.Strength * 0.7f, // Inherited but reduced
+                Secrecy = parentAlliance.Secrecy * 0.8f,
+                TrustLevel = 0.4f, // Start with moderate trust
+                CreatedGameDay = CampaignTime.Now.GetDayOfYear,
+                GroupId = parentAlliance.GroupId > 0 ? parentAlliance.GroupId : AssignNewGroupId(parentAlliance),
+                HasCommonEnemies = HasCommonEnemies(initiator, newClan),
+                PoliticalPressure = CalculatePoliticalPressure(initiator, newClan),
+                NextEligibleOperationDay = CampaignTime.Now.GetDayOfYear + Config.OperationIntervalDays
+            };
+
+            _alliances.Add(newAlliance);
+            
+            Debug.Print($"[SecretAlliances] Recruitment successful: {newClan.Name} joined coalition (Group {newAlliance.GroupId})");
+        }
+
+        private int AssignNewGroupId(SecretAllianceRecord alliance)
+        {
+            if (alliance.GroupId > 0) return alliance.GroupId;
+            
+            int newGroupId = _nextGroupId++;
+            alliance.GroupId = newGroupId;
+            
+            return newGroupId;
+        }
+
+        #endregion
+
         private void EvaluateAlliance(SecretAllianceRecord alliance)
         {
             var initiator = alliance.GetInitiatorClan();
@@ -2149,5 +2549,713 @@ namespace SecretAlliances
                 }
             }
         }
+
+        #region Missing Core Methods
+
+        // Alliance aging and decay
+        private void ProcessAllianceAging(SecretAllianceRecord alliance)
+        {
+            int age = CampaignTime.Now.GetDayOfYear - alliance.CreatedGameDay;
+            
+            // Ancient alliances with poor stats may dissolve
+            if (age > 540 && alliance.Strength < 0.3f && alliance.TrustLevel < 0.25f)
+            {
+                if (MBRandom.RandomFloat < 0.02f) // 2% chance daily
+                {
+                    alliance.IsActive = false;
+                    Debug.Print($"[SecretAlliances] Alliance dissolved due to age and weakness: " +
+                              $"{alliance.GetInitiatorClan()?.Name} <-> {alliance.GetTargetClan()?.Name}");
+                }
+            }
+        }
+
+        // Intelligence aging with reliability decay
+        private void ProcessIntelligenceAging()
+        {
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            var toRemove = new List<AllianceIntelligence>();
+
+            foreach (var intel in _intelligence)
+            {
+                intel.DaysOld++;
+                
+                // Reliability decay
+                intel.ReliabilityScore = MathF.Max(0f, intel.ReliabilityScore - 0.005f);
+                
+                // Remove old or unreliable intelligence
+                if (intel.DaysOld > 180 || intel.ReliabilityScore < 0.05f)
+                {
+                    toRemove.Add(intel);
+                }
+            }
+
+            foreach (var intel in toRemove)
+            {
+                _intelligence.Remove(intel);
+            }
+
+            if (toRemove.Count > 0 && Config.DebugVerbose)
+            {
+                Debug.Print($"[SecretAlliances] Removed {toRemove.Count} aged intelligence records");
+            }
+        }
+
+        // Coalition cohesion calculations
+        private void CalculateCoalitionCohesion()
+        {
+            var groups = _alliances.Where(a => a.IsActive && a.GroupId > 0)
+                                  .GroupBy(a => a.GroupId)
+                                  .ToList();
+
+            foreach (var group in groups)
+            {
+                var alliances = group.ToList();
+                if (alliances.Count < 2) continue; // Need at least 2 alliances for cohesion
+
+                float avgStrength = alliances.Average(a => a.Strength);
+                float avgSecrecy = alliances.Average(a => a.Secrecy);
+                
+                float cohesion = Config.CohesionStrengthFactor * avgStrength + 
+                                Config.CohesionSecrecyFactor * avgSecrecy;
+
+                // Update cached values
+                foreach (var alliance in alliances)
+                {
+                    alliance.GroupStrengthCache = avgStrength;
+                    alliance.GroupSecrecyCache = avgSecrecy;
+                    
+                    // Apply cohesion effects
+                    if (cohesion > 0.6f)
+                    {
+                        // High cohesion bonuses
+                        alliance.Strength += MathF.Min(0.002f, cohesion * 0.003f);
+                        alliance.Secrecy = MathF.Max(alliance.Secrecy - 0.001f, 0f); // Slower decay
+                    }
+                    else if (cohesion < 0.35f)
+                    {
+                        // Low cohesion penalties
+                        alliance.Secrecy = MathF.Max(alliance.Secrecy - 0.003f, 0f); // Faster decay
+                    }
+                }
+            }
+        }
+
+        // Forced reveal mechanics
+        private void ProcessForcedRevealMechanics()
+        {
+            foreach (var alliance in _alliances.Where(a => a.IsActive))
+            {
+                if (alliance.Strength > Config.ForcedRevealStrengthThreshold && 
+                    alliance.Secrecy < Config.ForcedRevealSecrecyThreshold)
+                {
+                    float revealChance = (alliance.Strength - Config.ForcedRevealStrengthThreshold) * 
+                                        (Config.ForcedRevealSecrecyThreshold - alliance.Secrecy + 0.05f);
+                    
+                    if (MBRandom.RandomFloat < revealChance)
+                    {
+                        ForceRevealAlliance(alliance);
+                    }
+                }
+            }
+        }
+
+        // Betrayal evaluation system
+        private void ProcessBetrayalEvaluations()
+        {
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            
+            // Prevent spam by checking if we already evaluated today
+            if (_lastEvaluationDay == currentDay) return;
+            _lastEvaluationDay = currentDay;
+
+            foreach (var alliance in _alliances.Where(a => a.IsActive && a.BetrayalCooldownDays <= 0))
+            {
+                EvaluateStrategicBetrayal(alliance);
+            }
+        }
+
+        private void EvaluateStrategicBetrayal(SecretAllianceRecord alliance)
+        {
+            float baseChance = Config.BetrayalBaseChance;
+            
+            // Calculate betrayal factors
+            float strengthFactor = 1.0f - alliance.Strength; // Weak alliances more likely to betray
+            float trustFactor = 1.0f - alliance.TrustLevel;  // Low trust increases betrayal
+            float pressureFactor = alliance.PoliticalPressure; // High pressure increases betrayal
+            float desperationFactor = CalculateDesperationLevel(alliance.GetInitiatorClan());
+
+            float betrayalChance = baseChance * (1f + strengthFactor + trustFactor + pressureFactor + desperationFactor);
+            
+            // Apply escalation counter
+            betrayalChance += alliance.BetrayalEscalationCounter;
+            
+            // Debug logging
+            if (Config.DebugVerbose || betrayalChance > 0.05f)
+            {
+                var factorJson = $"{{\"type\":\"StrategicBetrayal\",\"base\":{baseChance:F3}," +
+                               $"\"strength\":{strengthFactor:F3},\"trust\":{trustFactor:F3}," +
+                               $"\"pressure\":{pressureFactor:F3},\"desperation\":{desperationFactor:F3}," +
+                               $"\"escalation\":{alliance.BetrayalEscalationCounter:F3},\"final\":{betrayalChance:F3}}}";
+                Debug.Print($"[SecretAlliances] Betrayal evaluation: {factorJson}");
+            }
+
+            // Escalating near-miss system
+            float nearMissThreshold = betrayalChance * 1.25f;
+            float roll = MBRandom.RandomFloat;
+
+            if (roll < betrayalChance)
+            {
+                // Betrayal succeeds
+                ExecuteBetrayal(alliance);
+            }
+            else if (roll < nearMissThreshold)
+            {
+                // Near miss - escalate future attempts
+                alliance.BetrayalEscalationCounter = MathF.Min(alliance.BetrayalEscalationCounter + 0.05f, 0.15f);
+                Debug.Print($"[SecretAlliances] Near-miss betrayal, escalation increased to {alliance.BetrayalEscalationCounter:F3}");
+            }
+            
+            // Set cooldown to prevent immediate re-evaluation
+            alliance.BetrayalCooldownDays = 7;
+        }
+
+        private void ExecuteBetrayal(SecretAllianceRecord alliance)
+        {
+            alliance.BetrayalRevealed = true;
+            alliance.Secrecy = MathF.Max(0f, alliance.Secrecy - 0.4f); // Massive secrecy loss
+            alliance.Strength = MathF.Max(0.1f, alliance.Strength - 0.3f); // Significant strength loss
+            alliance.TrustLevel = MathF.Max(0f, alliance.TrustLevel - 0.5f); // Major trust loss
+            
+            // Optionally disable alliance
+            if (alliance.Strength < 0.2f && alliance.TrustLevel < 0.1f)
+            {
+                alliance.IsActive = false;
+            }
+            
+            Debug.Print($"[SecretAlliances] Betrayal executed: {alliance.GetInitiatorClan()?.Name} <-> {alliance.GetTargetClan()?.Name}");
+        }
+
+        // Data cleanup
+        private void CleanupOldData()
+        {
+            // Clean up old trade transfer records
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            foreach (var kvp in _recentTransfers.ToList())
+            {
+                var transfers = kvp.Value.Where(t => currentDay - t.Day <= 30).ToList(); // Keep last 30 days
+                if (transfers.Count == 0)
+                {
+                    _recentTransfers.Remove(kvp.Key);
+                }
+                else
+                {
+                    _recentTransfers[kvp.Key] = transfers.Take(20).ToList(); // Cap at 20 entries
+                }
+            }
+            
+            // Clean up operation cooldowns
+            foreach (var kvp in _operationCooldowns.ToList())
+            {
+                var validCooldowns = kvp.Value.Where(c => c.Value > currentDay).ToDictionary(c => c.Key, c => c.Value);
+                if (validCooldowns.Count == 0)
+                {
+                    _operationCooldowns.Remove(kvp.Key);
+                }
+                else
+                {
+                    _operationCooldowns[kvp.Key] = validCooldowns;
+                }
+            }
+        }
+
+        // Enhanced leak detection with logistic probability
+        private void CheckForLeaks(SecretAllianceRecord alliance, float multiplier = 1.0f)
+        {
+            float baseLeak = Config.LeakBaseChance * multiplier;
+            
+            // Pact bonuses
+            if (alliance.TradePact) baseLeak *= 1.1f;
+            if (alliance.MilitaryPact) baseLeak *= 1.15f;
+            
+            // Secrecy factor using logistic function
+            float secrecyFactor = 1f / (1f + MathF.Exp(10f * (alliance.Secrecy - 0.5f)));
+            
+            // Leak attempts increase chance
+            float attemptsFactor = 1f + (alliance.LeakAttempts * 0.15f);
+            
+            // Counter-intelligence buff
+            float counterIntelReduction = 1.0f;
+            if (CampaignTime.Now.GetDayOfYear < alliance.CounterIntelBuffExpiryDay)
+            {
+                counterIntelReduction = 0.5f; // 50% reduction during buff
+            }
+            
+            float finalLeakChance = baseLeak * secrecyFactor * attemptsFactor * counterIntelReduction;
+            
+            if (MBRandom.RandomFloat < finalLeakChance)
+            {
+                GenerateLeak(alliance);
+            }
+        }
+
+        private void GenerateLeak(SecretAllianceRecord alliance)
+        {
+            alliance.LeakAttempts++;
+            alliance.DaysWithoutLeak = 0;
+            
+            // Determine intelligence category
+            AllianceIntelType category = AllianceIntelType.General;
+            if (alliance.TradePact && alliance.MilitaryPact)
+            {
+                category = MBRandom.RandomFloat < 0.5f ? AllianceIntelType.Trade : AllianceIntelType.Military;
+            }
+            else if (alliance.TradePact)
+            {
+                category = AllianceIntelType.Trade;
+            }
+            else if (alliance.MilitaryPact)
+            {
+                category = AllianceIntelType.Military;
+            }
+
+            // Find informer
+            var informer = GetRandomInformer(alliance);
+            if (informer == null) return;
+
+            // Calculate reliability and severity
+            float reliability = CalculateInformerReliability(informer);
+            float severity = CalculateLeakSeverity(alliance);
+            
+            var intel = new AllianceIntelligence
+            {
+                AllianceId = alliance.UniqueId,
+                InformerHeroId = informer.Id,
+                ReliabilityScore = reliability,
+                DaysOld = 0,
+                IsConfirmed = false,
+                SeverityLevel = severity,
+                ClanAId = alliance.InitiatorClanId,
+                ClanBId = alliance.TargetClanId,
+                IntelCategory = (int)category
+            };
+
+            _intelligence.Add(intel);
+            alliance.LastLeakSeverity = severity;
+            
+            Debug.Print($"[SecretAlliances] Leak generated: {alliance.GetInitiatorClan()?.Name} <-> " +
+                       $"{alliance.GetTargetClan()?.Name} (Severity: {severity:F2}, Category: {category})");
+        }
+
+        private float CalculateLeakSeverity(SecretAllianceRecord alliance)
+        {
+            float severity = alliance.Strength * 0.4f; // Stronger alliances = more severe leaks
+            severity += (1f - alliance.Secrecy) * 0.3f; // Less secret = more severe
+            
+            if (alliance.BetrayalRevealed) severity += 0.2f;
+            if (alliance.SuccessfulOperations > 5) severity += 0.1f;
+            
+            return MathF.Min(severity, 1.0f);
+        }
+
+        private Hero GetRandomInformer(SecretAllianceRecord alliance)
+        {
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+            
+            var potentialInformers = new List<Hero>();
+            
+            if (initiator?.Heroes != null) potentialInformers.AddRange(initiator.Heroes);
+            if (target?.Heroes != null) potentialInformers.AddRange(target.Heroes);
+            
+            return potentialInformers.Any() ? potentialInformers[MBRandom.RandomInt(potentialInformers.Count)] : null;
+        }
+
+        #endregion
+
+        #region Public Methods for Console Commands and Dialog Integration
+
+        // Public interface methods for console commands and dialog system
+        public List<SecretAllianceRecord> GetAlliances()
+        {
+            return _alliances.ToList();
+        }
+
+        public SecretAllianceRecord FindAlliance(Clan clan1, Clan clan2)
+        {
+            return _alliances.FirstOrDefault(a => a.IsActive &&
+                ((a.InitiatorClanId == clan1.Id && a.TargetClanId == clan2.Id) ||
+                 (a.InitiatorClanId == clan2.Id && a.TargetClanId == clan1.Id)));
+        }
+
+        public void ForceLeakForTesting(SecretAllianceRecord alliance)
+        {
+            GenerateLeak(alliance);
+        }
+
+        public void ExecuteOperationForTesting(SecretAllianceRecord alliance, int operationType)
+        {
+            if (operationType >= 1 && operationType <= 5)
+            {
+                ExecuteOperation(alliance, (OperationType)operationType);
+            }
+        }
+
+        public void ForceRevealAlliance(SecretAllianceRecord alliance)
+        {
+            alliance.BetrayalRevealed = true;
+            
+            // Generate high-severity intelligence for all clans in same kingdom
+            var initiatorKingdom = alliance.GetInitiatorClan()?.Kingdom;
+            var targetKingdom = alliance.GetTargetClan()?.Kingdom;
+            
+            var affectedClans = Clan.All.Where(c => 
+                (c.Kingdom == initiatorKingdom || c.Kingdom == targetKingdom) &&
+                c != alliance.GetInitiatorClan() && 
+                c != alliance.GetTargetClan()).ToList();
+
+            foreach (var clan in affectedClans.Take(5)) // Limit to prevent spam
+            {
+                var informer = clan.Heroes?.FirstOrDefault();
+                if (informer == null) continue;
+
+                var intel = new AllianceIntelligence
+                {
+                    AllianceId = alliance.UniqueId,
+                    InformerHeroId = informer.Id,
+                    ReliabilityScore = 0.7f, // Moderate reliability for forced reveal
+                    DaysOld = 0,
+                    IsConfirmed = true,
+                    SeverityLevel = 0.9f, // Very high severity
+                    ClanAId = alliance.InitiatorClanId,
+                    ClanBId = alliance.TargetClanId,
+                    IntelCategory = (int)AllianceIntelType.General
+                };
+
+                _intelligence.Add(intel);
+            }
+            
+            Debug.Print($"[SecretAlliances] Alliance forcibly revealed to {affectedClans.Count} clans");
+        }
+
+        public void CreateTestAlliance(Clan clan1, Clan clan2)
+        {
+            CreateNewAlliance(clan1, clan2);
+        }
+
+        // Rumor system integration
+        public bool ShouldShowRumorOption(Hero asker, Hero target)
+        {
+            if (asker?.Clan == null || target?.Clan == null) return false;
+            
+            var playerClan = Clan.PlayerClan;
+            if (playerClan == null) return false;
+            
+            // Check if both sides share an active alliance with player clan
+            bool askerConnected = FindAlliance(asker.Clan, playerClan) != null;
+            bool targetConnected = FindAlliance(target.Clan, playerClan) != null;
+            
+            if (askerConnected && targetConnected) return true;
+            
+            // Check coalition groups
+            var askerAlliance = _alliances.FirstOrDefault(a => a.IsActive && 
+                (a.InitiatorClanId == asker.Clan.Id || a.TargetClanId == asker.Clan.Id));
+            var targetAlliance = _alliances.FirstOrDefault(a => a.IsActive && 
+                (a.InitiatorClanId == target.Clan.Id || a.TargetClanId == target.Clan.Id));
+            var playerAlliance = _alliances.FirstOrDefault(a => a.IsActive && 
+                (a.InitiatorClanId == playerClan.Id || a.TargetClanId == playerClan.Id));
+            
+            return askerAlliance?.GroupId > 0 && targetAlliance?.GroupId > 0 && playerAlliance?.GroupId > 0 &&
+                   askerAlliance.GroupId == targetAlliance.GroupId && 
+                   targetAlliance.GroupId == playerAlliance.GroupId;
+        }
+
+        public string GetTopRumorString(Hero hero)
+        {
+            var rumors = TryGetRumorsForHero(hero, Clan.PlayerClan, 1);
+            return rumors.FirstOrDefault() ?? "";
+        }
+
+        public List<string> TryGetRumorsForHero(Hero hero, Clan playerClan, int max = 3)
+        {
+            if (hero?.Clan == null || playerClan == null) return new List<string>();
+            
+            // Filter relevant intelligence
+            var relevantIntel = _intelligence.Where(i =>
+                i.ReliabilityScore >= 0.25f &&
+                i.SeverityLevel > 0f &&
+                (i.ClanAId == playerClan.Id || i.ClanBId == playerClan.Id || 
+                 i.ClanAId == hero.Clan.Id || i.ClanBId == hero.Clan.Id) &&
+                IsIntelRelevantToPlayer(i, playerClan, hero.Clan)).ToList();
+            
+            // Calculate scores and rank
+            var scoredIntel = relevantIntel.Select(i => new {
+                Intel = i,
+                Score = CalculateIntelScore(i)
+            }).OrderByDescending(x => x.Score).Take(max).ToList();
+            
+            // Format as rumor strings
+            return scoredIntel.Select(x => FormatRumorString(x.Intel)).ToList();
+        }
+
+        private bool IsIntelRelevantToPlayer(AllianceIntelligence intel, Clan playerClan, Clan heroClan)
+        {
+            // Check if player clan is involved
+            if (intel.ClanAId != playerClan.Id && intel.ClanBId != playerClan.Id) return false;
+            
+            // Check if hero clan matches one side or shares coalition
+            if (intel.ClanAId == heroClan.Id || intel.ClanBId == heroClan.Id) return true;
+            
+            // Check coalition group sharing
+            var heroAlliance = _alliances.FirstOrDefault(a => a.IsActive && 
+                (a.InitiatorClanId == heroClan.Id || a.TargetClanId == heroClan.Id));
+            var intelAlliance = _alliances.FirstOrDefault(a => a.UniqueId == intel.AllianceId);
+            
+            return heroAlliance?.GroupId > 0 && intelAlliance?.GroupId > 0 && 
+                   heroAlliance.GroupId == intelAlliance.GroupId;
+        }
+
+        private float CalculateIntelScore(AllianceIntelligence intel)
+        {
+            float reliability = intel.ReliabilityScore;
+            float recency = MathF.Max(0.5f, 1f - intel.DaysOld * 0.01f);
+            
+            float categoryWeight = ((AllianceIntelType)intel.IntelCategory) switch
+            {
+                AllianceIntelType.Coup => 1.25f,
+                AllianceIntelType.Military => 1.15f,
+                AllianceIntelType.Financial => 1.1f,
+                AllianceIntelType.Recruitment => 1.0f,
+                AllianceIntelType.Trade => 0.95f,
+                _ => 0.9f
+            };
+            
+            return reliability * recency * categoryWeight;
+        }
+
+        private string FormatRumorString(AllianceIntelligence intel)
+        {
+            var clanA = MBObjectManager.Instance.GetObject<Clan>(c => c.Id == intel.ClanAId);
+            var clanB = MBObjectManager.Instance.GetObject<Clan>(c => c.Id == intel.ClanBId);
+            var informer = intel.GetInformer();
+            
+            string clanNames = (clanA?.Name != null && clanB?.Name != null) ? 
+                             $"{clanA.Name} and {clanB.Name}" : "certain clans";
+            string informerName = informer?.Name?.ToString() ?? "a contact";
+            
+            var category = (AllianceIntelType)intel.IntelCategory;
+            string rumor = category switch
+            {
+                AllianceIntelType.Military => $"I heard from {informerName} that {clanNames} have been coordinating military movements.",
+                AllianceIntelType.Trade => $"{informerName} mentioned seeing unusual trade activity between {clanNames}.",
+                AllianceIntelType.Financial => $"There are rumors of gold changing hands between {clanNames}, according to {informerName}.",
+                AllianceIntelType.Coup => $"{informerName} whispers of plots brewing between {clanNames}.",
+                _ => $"{informerName} speaks of secretive meetings between {clanNames}."
+            };
+            
+            return rumor;
+        }
+
+        #endregion
+
+        #region Trade and Financial Dynamics
+
+        private void ProcessTradePactEffects(SecretAllianceRecord alliance)
+        {
+            if (!alliance.TradePact) return;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+            
+            if (initiator == null || target == null) return;
+
+            // Calculate disparity and transfer
+            float disparityRatio = CalculateWealthDisparity(initiator, target);
+            if (disparityRatio < 0.2f) return; // Not enough disparity for transfer
+
+            float basePotential = Config.TradeFlowMultiplier * disparityRatio * (0.5f + alliance.TrustLevel * 0.5f);
+            int transferAmount = (int)(basePotential * 1000); // Scale to reasonable gold amounts
+
+            Clan giver, receiver;
+            if (initiator.Gold > target.Gold)
+            {
+                giver = initiator;
+                receiver = target;
+            }
+            else
+            {
+                giver = target;
+                receiver = initiator;
+            }
+
+            // Ensure giver retains 75% of gold above 5k buffer
+            int availableGold = Math.Max(0, giver.Gold - 5000);
+            int maxTransfer = (int)(availableGold * 0.25f);
+            transferAmount = Math.Min(transferAmount, maxTransfer);
+
+            if (transferAmount > 100) // Minimum meaningful transfer
+            {
+                ExecuteTradeTransfer(alliance, giver, receiver, transferAmount);
+            }
+        }
+
+        private float CalculateWealthDisparity(Clan clan1, Clan clan2)
+        {
+            int gold1 = clan1.Gold;
+            int gold2 = clan2.Gold;
+            
+            if (gold1 + gold2 == 0) return 0f;
+            
+            float disparity = MathF.Abs(gold1 - gold2) / (float)(gold1 + gold2);
+            return disparity;
+        }
+
+        private void ExecuteTradeTransfer(SecretAllianceRecord alliance, Clan giver, Clan receiver, int amount)
+        {
+            // Execute the transfer
+            giver.Gold = Math.Max(0, giver.Gold - amount);
+            receiver.Gold += amount;
+
+            // Track transfer for magnitude percentile calculation
+            TrackTradeTransfer(alliance, giver.Id, receiver.Id, amount);
+
+            // Calculate transfer magnitude percentile
+            float percentile = CalculateTransferMagnitudePercentile(alliance, amount);
+            
+            // Generate intelligence if significant transfer
+            if (percentile > 0.6f)
+            {
+                GenerateFinancialIntelligence(alliance, amount, giver, receiver);
+            }
+
+            // Apply alliance effects based on transfer magnitude
+            float trustGain = Math.Min(0.02f, amount / 50000f); // Diminishing returns
+            alliance.TrustLevel = Math.Min(1f, alliance.TrustLevel + trustGain);
+            
+            // Secrecy penalty for large transfers
+            float secrecyPenalty = percentile * 0.01f;
+            alliance.Secrecy = Math.Max(0f, alliance.Secrecy - secrecyPenalty);
+
+            if (Config.DebugVerbose)
+            {
+                Debug.Print($"[SecretAlliances] Trade transfer: {giver.Name} -> {receiver.Name} " +
+                          $"({amount} gold, percentile: {percentile:F2})");
+            }
+        }
+
+        private void TrackTradeTransfer(SecretAllianceRecord alliance, MBGUID giverClan, MBGUID receiverClan, int amount)
+        {
+            if (!_recentTransfers.ContainsKey(alliance.UniqueId))
+            {
+                _recentTransfers[alliance.UniqueId] = new List<TradeTransferRecord>();
+            }
+
+            var record = new TradeTransferRecord
+            {
+                Day = CampaignTime.Now.GetDayOfYear,
+                Amount = amount,
+                FromClan = giverClan,
+                ToClan = receiverClan
+            };
+
+            _recentTransfers[alliance.UniqueId].Add(record);
+            
+            // Keep only last 20 transfers
+            if (_recentTransfers[alliance.UniqueId].Count > 20)
+            {
+                _recentTransfers[alliance.UniqueId].RemoveAt(0);
+            }
+        }
+
+        private float CalculateTransferMagnitudePercentile(SecretAllianceRecord alliance, int amount)
+        {
+            if (!_recentTransfers.ContainsKey(alliance.UniqueId) || _recentTransfers[alliance.UniqueId].Count < 2)
+            {
+                return 0.5f; // Default if no history
+            }
+
+            var transfers = _recentTransfers[alliance.UniqueId];
+            var amounts = transfers.Select(t => t.Amount).OrderBy(a => a).ToList();
+            
+            int rank = amounts.Count(a => a < amount);
+            return (float)rank / amounts.Count;
+        }
+
+        private void GenerateFinancialIntelligence(SecretAllianceRecord alliance, int amount, Clan giver, Clan receiver)
+        {
+            // Find potential informant from either clan
+            var informer = GetRandomInformer(alliance);
+            if (informer == null) return;
+
+            float reliability = CalculateInformerReliability(informer) * 0.9f; // Financial intel slightly less reliable
+            float severity = Math.Min(0.8f, amount / 100000f); // Scale with transfer size
+
+            var intel = new AllianceIntelligence
+            {
+                AllianceId = alliance.UniqueId,
+                InformerHeroId = informer.Id,
+                ReliabilityScore = reliability,
+                DaysOld = 0,
+                IsConfirmed = false,
+                SeverityLevel = severity,
+                ClanAId = alliance.InitiatorClanId,
+                ClanBId = alliance.TargetClanId,
+                IntelCategory = (int)AllianceIntelType.Financial
+            };
+
+            _intelligence.Add(intel);
+            
+            Debug.Print($"[SecretAlliances] Financial intelligence generated: {giver.Name} -> {receiver.Name} " +
+                       $"({amount} gold, severity: {severity:F2})");
+        }
+
+        #endregion
+
+        #region Intelligence Generation Helpers
+
+        private void CreateSpyIntelligence(SecretAllianceRecord alliance, Clan targetClan)
+        {
+            var informer = GetRandomInformer(alliance);
+            if (informer == null) return;
+
+            var intel = new AllianceIntelligence
+            {
+                AllianceId = alliance.UniqueId,
+                InformerHeroId = informer.Id,
+                ReliabilityScore = CalculateInformerReliability(informer) * 0.8f,
+                DaysOld = 0,
+                IsConfirmed = false,
+                SeverityLevel = 0.6f,
+                ClanAId = alliance.InitiatorClanId,
+                ClanBId = targetClan.Id, // Target of spy operation
+                IntelCategory = (int)AllianceIntelType.Military
+            };
+
+            _intelligence.Add(intel);
+            Debug.Print($"[SecretAlliances] Spy intelligence created about {targetClan.Name}");
+        }
+
+        private void CreateSabotageIntelligence(SecretAllianceRecord alliance, Clan targetClan)
+        {
+            var informer = GetRandomInformer(alliance);
+            if (informer == null) return;
+
+            var intel = new AllianceIntelligence
+            {
+                AllianceId = alliance.UniqueId,
+                InformerHeroId = informer.Id,
+                ReliabilityScore = CalculateInformerReliability(informer),
+                DaysOld = 0,
+                IsConfirmed = false,
+                SeverityLevel = 0.85f, // High severity for sabotage
+                ClanAId = alliance.InitiatorClanId,
+                ClanBId = targetClan.Id,
+                IntelCategory = (int)AllianceIntelType.Military
+            };
+
+            _intelligence.Add(intel);
+            Debug.Print($"[SecretAlliances] Sabotage intelligence created about operation against {targetClan.Name}");
+        }
+
+        #endregion
     }
 }
