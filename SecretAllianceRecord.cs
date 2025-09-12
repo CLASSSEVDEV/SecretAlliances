@@ -70,6 +70,15 @@ namespace SecretAlliances
         [SaveableField(30)] public float GroupSecrecyCache;
         [SaveableField(31)] public float GroupStrengthCache;
 
+        // Enhanced operations framework fields (Former PR 5)
+        [SaveableField(32)] public int DefectionCooldownDays;
+        [SaveableField(33)] public float BetrayalRiskEscalator;
+        [SaveableField(34)] public int HighMagnitudeTransferCount;
+        [SaveableField(35)] public int LastHighTransferDay;
+        [SaveableField(36)] public int OperationCooldowns; // Bitmask for different operation types
+        [SaveableField(37)] public int SuspicionLevel;
+        [SaveableField(38)] public int LastSuspicionEvent;
+
 
 
         public Clan GetInitiatorClan()
@@ -111,6 +120,40 @@ namespace SecretAlliances
         TradePactEvidence = 1,
         MilitaryCoordination = 2,
         SecretMeeting = 3,
-        BetrayalPlot = 4
+        BetrayalPlot = 4,
+        Financial = 5,
+        Recruitment = 6,
+        Coup = 7,
+        Trade = 8,
+        Military = 9
+    }
+
+    // Enum for operation types (Former PR 5 requirement)
+    public enum PendingOperationType
+    {
+        None = 0,
+        CovertAid = 1,
+        SpyProbe = 2,
+        RecruitmentFeelers = 3,
+        SabotageRaid = 4,
+        CounterIntelligenceSweep = 5
+    }
+
+    // Category weights for intelligence scoring (Former PR 6 requirement)
+    public static class IntelCategoryWeights
+    {
+        public static readonly Dictionary<AllianceIntelType, float> Weights = new Dictionary<AllianceIntelType, float>
+        {
+            { AllianceIntelType.Coup, 1.25f },
+            { AllianceIntelType.Military, 1.15f },
+            { AllianceIntelType.Financial, 1.1f },
+            { AllianceIntelType.Recruitment, 1.0f },
+            { AllianceIntelType.Trade, 0.95f },
+            { AllianceIntelType.GeneralRumor, 0.9f },
+            { AllianceIntelType.TradePactEvidence, 0.95f },
+            { AllianceIntelType.MilitaryCoordination, 1.15f },
+            { AllianceIntelType.SecretMeeting, 1.0f },
+            { AllianceIntelType.BetrayalPlot, 1.2f }
+        };
     }
 }
