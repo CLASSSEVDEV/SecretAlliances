@@ -21,13 +21,17 @@ namespace SecretAlliances
         private List<AllianceIntelligence> _intelligence = new List<AllianceIntelligence>();
         
         private int _nextGroupId = 1; // For coalition support
+        private bool _hasRunFirstDayDiagnostics = false;
+        private int _lastEvaluationDay = -1;
+        
+        // Operation cooldown tracking (ephemeral - not saved for simplicity)
+        private Dictionary<MBGUID, Dictionary<int, int>> _operationCooldowns = new Dictionary<MBGUID, Dictionary<int, int>>();
+        
+        // Trade transfer tracking for magnitude percentile calculations
+        private Dictionary<MBGUID, List<TradeTransferRecord>> _recentTransfers = new Dictionary<MBGUID, List<TradeTransferRecord>>();
 
-        // Constants for tuning
-        private const float DAILY_SECRECY_DECAY = 0.002f;
-        private const float DAILY_STRENGTH_GROWTH = 0.003f;
-        private const float LEAK_BASE_CHANCE = 0.008f;
-        private const float COUP_STRENGTH_THRESHOLD = 0.75f;
-        private const float COUP_SECRECY_THRESHOLD = 0.35f;
+        // Configuration constants - replaced by dynamic config
+        private AllianceConfig Config => AllianceConfig.Instance;
 
         public override void RegisterEvents()
         {
@@ -65,6 +69,13 @@ namespace SecretAlliances
         {
             if (clan == null || clan.IsEliminated) return;
 
+            // First-day diagnostics (run once)
+            if (!_hasRunFirstDayDiagnostics && clan == Clan.All.FirstOrDefault())
+            {
+                RunInitializationDiagnostics();
+                _hasRunFirstDayDiagnostics = true;
+            }
+
             // Process all alliances involving this clan
             var relevantAlliances = _alliances.Where(a =>
                 a.IsActive &&
@@ -78,29 +89,210 @@ namespace SecretAlliances
                 ProcessTradePactEffects(alliance);
                 ProcessMilitaryPactEffects(alliance);
 
+                // Process aging and decay
+                ProcessAllianceAging(alliance);
+
                 // Age cooldown per alliance
                 if (alliance.CooldownDays > 0)
                 {
                     alliance.CooldownDays--;
                 }
+                
+                // Age betrayal cooldown
+                if (alliance.BetrayalCooldownDays > 0)
+                {
+                    alliance.BetrayalCooldownDays--;
+                }
             }
 
-            // Check for new alliance opportunities (AI consideration)
-            if (MBRandom.RandomFloat < 0.1f)
-            {
-                ConsiderNewAlliances(clan);
-            }
+            // Check for new alliance opportunities with enhanced AI
+            EvaluateAllianceFormationAI(clan);
+
+            // Process operations framework
+            ProcessOperationsDaily(clan);
 
             // Process intelligence aging daily
-            ProcessIntelligence();
+            ProcessIntelligenceAging();
 
-            // Process coalition cohesion (once per day, triggered by first clan)
+            // Global processes (once per day, triggered by first clan)
             if (clan == Clan.All.FirstOrDefault())
             {
                 CalculateCoalitionCohesion();
-                ProcessOperationsScaffolding();
+                ProcessForcedRevealMechanics();
+                ProcessBetrayalEvaluations();
+                CleanupOldData();
             }
         }
+
+        #region Initialization and Diagnostics
+
+        private void RunInitializationDiagnostics()
+        {
+            int activeAlliances = _alliances.Count(a => a.IsActive);
+            float avgStrength = activeAlliances > 0 ? _alliances.Where(a => a.IsActive).Average(a => a.Strength) : 0f;
+            float avgSecrecy = activeAlliances > 0 ? _alliances.Where(a => a.IsActive).Average(a => a.Secrecy) : 0f;
+            int numGroups = _alliances.Where(a => a.IsActive && a.GroupId > 0).Select(a => a.GroupId).Distinct().Count();
+
+            Debug.Print($"[SecretAlliances] Initialization Diagnostics:");
+            Debug.Print($"  Active Alliances: {activeAlliances}");
+            Debug.Print($"  Average Strength: {avgStrength:F3}");
+            Debug.Print($"  Average Secrecy: {avgSecrecy:F3}");
+            Debug.Print($"  Coalition Groups: {numGroups}");
+            Debug.Print($"  Intelligence Records: {_intelligence.Count}");
+            
+            // Repair invalid UniqueId entries
+            RepairUniqueIds();
+        }
+
+        private void RepairUniqueIds()
+        {
+            int repaired = 0;
+            foreach (var alliance in _alliances)
+            {
+                if (alliance.UniqueId == MBGUID.Empty)
+                {
+                    alliance.UniqueId = alliance.InitiatorClanId; // Use InitiatorClanId as fallback
+                    repaired++;
+                }
+            }
+            
+            if (repaired > 0)
+            {
+                Debug.Print($"[SecretAlliances] Repaired {repaired} invalid UniqueId entries");
+            }
+        }
+
+        #endregion
+
+        #region Alliance Formation AI
+
+        private void EvaluateAllianceFormationAI(Clan clan)
+        {
+            if (MBRandom.RandomFloat > Config.FormationBaseChance) return;
+
+            // Check daily formation limit
+            int formationsToday = _alliances.Count(a => a.CreatedGameDay == CampaignTime.Now.GetDayOfYear);
+            if (formationsToday >= Config.MaxDailyFormations) return;
+
+            // Find potential alliance targets
+            var candidates = Clan.All.Where(c => 
+                c != clan && 
+                !c.IsEliminated && 
+                !c.IsMinorFaction && 
+                !HasExistingAlliance(clan, c)).ToList();
+
+            if (!candidates.Any()) return;
+
+            foreach (var candidate in candidates.Take(3)) // Limit evaluation to prevent performance issues
+            {
+                float formationChance = CalculateFormationChance(clan, candidate);
+                
+                if (Config.DebugVerbose && formationChance > 0.05f)
+                {
+                    Debug.Print($"[SecretAlliances] Formation chance {clan.Name} -> {candidate.Name}: {formationChance:F3}");
+                }
+
+                if (MBRandom.RandomFloat < formationChance)
+                {
+                    CreateNewAlliance(clan, candidate);
+                    break; // Only one formation per clan per day
+                }
+            }
+        }
+
+        private float CalculateFormationChance(Clan initiator, Clan target)
+        {
+            float baseChance = Config.FormationBaseChance;
+            
+            // Mutual enemies factor
+            float mutualEnemiesFactor = HasCommonEnemies(initiator, target) ? 1.5f : 1.0f;
+            
+            // Economic disparity factor (desperation)
+            float initiatorDesperation = CalculateDesperationLevel(initiator);
+            float targetDesperation = CalculateDesperationLevel(target);
+            float desperationFactor = 1.0f + (initiatorDesperation + targetDesperation) * 0.5f;
+            
+            // Political pressure factor
+            float politicalPressure = CalculatePoliticalPressure(initiator, target);
+            float pressureFactor = 1.0f + politicalPressure * 0.3f;
+            
+            // Military power relationship
+            float militaryFactor = CalculateMilitaryPowerFactor(initiator, target);
+            
+            float finalChance = baseChance * mutualEnemiesFactor * desperationFactor * pressureFactor * militaryFactor;
+            
+            return MathF.Min(finalChance, 0.5f); // Cap at 50%
+        }
+
+        private float CalculatePoliticalPressure(Clan clan1, Clan clan2)
+        {
+            float pressure = 0f;
+            
+            // Same kingdom under threat
+            if (clan1.Kingdom == clan2.Kingdom && clan1.Kingdom != null)
+            {
+                int enemies = clan1.Kingdom.Enemies.Count();
+                pressure += enemies * 0.1f;
+            }
+            
+            // Different kingdoms at war
+            if (clan1.Kingdom != clan2.Kingdom && clan1.Kingdom != null && clan2.Kingdom != null)
+            {
+                if (clan1.Kingdom.IsAtWarWith(clan2.Kingdom))
+                {
+                    pressure += 0.3f; // Secret alliance despite war
+                }
+            }
+            
+            return MathF.Min(pressure, 1.0f);
+        }
+
+        private float CalculateMilitaryPowerFactor(Clan clan1, Clan clan2)
+        {
+            if (clan1.TotalStrength <= 0 || clan2.TotalStrength <= 0) return 1.0f;
+            
+            float ratio = clan1.TotalStrength / clan2.TotalStrength;
+            
+            // Prefer alliances between similarly powered clans, or strong helping weak
+            if (ratio >= 0.5f && ratio <= 2.0f)
+            {
+                return 1.2f; // Balanced power
+            }
+            else if (ratio > 2.0f)
+            {
+                return 1.1f; // Strong helping weak (moderate bonus)
+            }
+            else
+            {
+                return 0.8f; // Very unbalanced (less likely)
+            }
+        }
+
+        private void CreateNewAlliance(Clan initiator, Clan target)
+        {
+            var alliance = new SecretAllianceRecord
+            {
+                InitiatorClanId = initiator.Id,
+                TargetClanId = target.Id,
+                UniqueId = MBGUID.Empty.Equals(MBGUID.Empty) ? initiator.Id : MBObjectManager.Instance.CreateGuid(),
+                IsActive = true,
+                Strength = MBRandom.RandomFloatRanged(0.2f, 0.4f),
+                Secrecy = MBRandom.RandomFloatRanged(0.6f, 0.9f),
+                TrustLevel = MBRandom.RandomFloatRanged(0.3f, 0.5f),
+                CreatedGameDay = CampaignTime.Now.GetDayOfYear,
+                GroupId = 0, // Will be assigned later if joins coalition
+                HasCommonEnemies = HasCommonEnemies(initiator, target),
+                PoliticalPressure = CalculatePoliticalPressure(initiator, target),
+                NextEligibleOperationDay = CampaignTime.Now.GetDayOfYear + Config.OperationIntervalDays
+            };
+
+            _alliances.Add(alliance);
+            
+            Debug.Print($"[SecretAlliances] New alliance formed: {initiator.Name} <-> {target.Name} " +
+                       $"(S:{alliance.Strength:F2}, Sec:{alliance.Secrecy:F2})");
+        }
+
+        #endregion
 
         private void EvaluateAlliance(SecretAllianceRecord alliance)
         {

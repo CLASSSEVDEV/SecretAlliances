@@ -27,6 +27,12 @@ namespace SecretAlliances
             PendingOperationType = 0;
             GroupSecrecyCache = 0f;
             GroupStrengthCache = 0f;
+            
+            // Initialize mega feature expansion fields
+            NextEligibleOperationDay = 0;
+            BetrayalCooldownDays = 0;
+            CounterIntelBuffExpiryDay = 0;
+            BetrayalEscalationCounter = 0f;
         }
 
         [SaveableField(1)] public MBGUID InitiatorClanId;
@@ -70,6 +76,12 @@ namespace SecretAlliances
         [SaveableField(30)] public float GroupSecrecyCache;
         [SaveableField(31)] public float GroupStrengthCache;
 
+        // Additional fields for mega feature expansion (indices 32+)
+        [SaveableField(32)] public int NextEligibleOperationDay;
+        [SaveableField(33)] public int BetrayalCooldownDays;
+        [SaveableField(34)] public int CounterIntelBuffExpiryDay;
+        [SaveableField(35)] public float BetrayalEscalationCounter;
+
 
 
         public Clan GetInitiatorClan()
@@ -107,10 +119,35 @@ namespace SecretAlliances
     // Enum for intelligence categorization (mapped to int for save safety)
     public enum AllianceIntelType
     {
-        GeneralRumor = 0,
+        General = 0,
         TradePactEvidence = 1,
         MilitaryCoordination = 2,
         SecretMeeting = 3,
-        BetrayalPlot = 4
+        BetrayalPlot = 4,
+        Coup = 5,
+        Military = 6,
+        Financial = 7,
+        Recruitment = 8,
+        Trade = 9
+    }
+
+    // Helper class for trade transfer tracking (not persisted)
+    public class TradeTransferRecord
+    {
+        public int Day { get; set; }
+        public int Amount { get; set; }
+        public MBGUID FromClan { get; set; }
+        public MBGUID ToClan { get; set; }
+    }
+
+    // Operation types enumeration
+    public enum OperationType
+    {
+        None = 0,
+        CovertAid = 1,
+        SpyProbe = 2,
+        RecruitmentFeelers = 3,
+        SabotageRaid = 4,
+        CounterIntelligence = 5
     }
 }
