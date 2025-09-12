@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using TaleWorlds.CampaignSystem;
@@ -21,8 +22,13 @@ namespace SecretAlliances
         private List<AllianceIntelligence> _intelligence = new List<AllianceIntelligence>();
         
         private int _nextGroupId = 1; // For coalition support
+        
+        // Configuration and module management
+        private AllianceConfig _config;
+        private string _moduleRootPath;
+        private bool _integrityCheckCompleted = false;
 
-        // Constants for tuning
+        // Constants for tuning (will be overridden by config)
         private const float DAILY_SECRECY_DECAY = 0.002f;
         private const float DAILY_STRENGTH_GROWTH = 0.003f;
         private const float LEAK_BASE_CHANCE = 0.008f;
@@ -31,15 +37,17 @@ namespace SecretAlliances
 
         public override void RegisterEvents()
         {
+            // Initialize configuration and module path
+            InitializeConfiguration();
+
             // Daily clan processing
             CampaignEvents.DailyTickClanEvent.AddNonSerializedListener(this, OnDailyTickClan);
 
-            // Battle events for alliance considerations
+            // Battle events for alliance considerations and betrayal evaluation
             CampaignEvents.MapEventStarted.AddNonSerializedListener(this, OnBattleStarted);
             CampaignEvents.MapEventEnded.AddNonSerializedListener(this, OnBattleEnded);
 
             // Political events
-            // AFTER
             CampaignEvents.OnClanChangedKingdomEvent.AddNonSerializedListener(this, OnClanChangedKingdom);
             CampaignEvents.KingdomDestroyedEvent.AddNonSerializedListener(this, OnKingdomDestroyed);
 
@@ -50,8 +58,77 @@ namespace SecretAlliances
             CampaignEvents.WarDeclared.AddNonSerializedListener(this, OnWarDeclared);
             CampaignEvents.MakePeace.AddNonSerializedListener(this, OnPeaceDeclared);
 
-            
+            // Register console commands if enabled
+            if (_config != null && _config.DebugEnableConsoleCommands)
+            {
+                RegisterConsoleCommands();
+                Debug.Print("[SecretAlliances] WARNING: Debug console commands are enabled! This should only be used for testing.");
+            }
+        }
 
+        private void InitializeConfiguration()
+        {
+            try
+            {
+                // Determine module root path - try multiple fallback methods
+                _moduleRootPath = GetModuleRootPath();
+                
+                // Load configuration
+                _config = AllianceConfig.LoadOrCreate(_moduleRootPath);
+                
+                Debug.Print($"[SecretAlliances] Initialized with module path: {_moduleRootPath}");
+            }
+            catch (Exception ex)
+            {
+                Debug.Print($"[SecretAlliances] Failed to initialize configuration: {ex.Message}");
+                _config = new AllianceConfig(); // Use defaults
+            }
+        }
+
+        private string GetModuleRootPath()
+        {
+            // Method 1: Try to derive from current assembly location
+            try
+            {
+                string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(assemblyPath))
+                {
+                    string moduleRoot = Path.GetDirectoryName(Path.GetDirectoryName(assemblyPath));
+                    if (Directory.Exists(moduleRoot))
+                    {
+                        return moduleRoot;
+                    }
+                }
+            }
+            catch { }
+
+            // Method 2: Try common Bannerlord module paths
+            string[] commonPaths = {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Mount and Blade II Bannerlord", "Modules", "SecretAlliances"),
+                @"D:\Games\Mount & Blade 2 - Bannerlord\Modules\SecretAlliances",
+                @"C:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord\Modules\SecretAlliances"
+            };
+
+            foreach (string path in commonPaths)
+            {
+                if (Directory.Exists(path))
+                {
+                    return path;
+                }
+            }
+
+            // Method 3: Fallback to current directory or binary directory
+            string fallback = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? Directory.GetCurrentDirectory();
+            Debug.Print($"[SecretAlliances] Using fallback path: {fallback}");
+            return fallback;
+        }
+
+        private void RegisterConsoleCommands()
+        {
+            // TODO: Implement console command registration
+            // This would typically involve registering commands with the game's console system
+            // For now, just log that commands would be registered
+            Debug.Print("[SecretAlliances] Console commands would be registered here (implementation pending)");
         }
 
         public override void SyncData(IDataStore dataStore)
@@ -65,6 +142,16 @@ namespace SecretAlliances
         {
             if (clan == null || clan.IsEliminated) return;
 
+            // Perform integrity check and self-diagnostics on first daily tick
+            if (!_integrityCheckCompleted)
+            {
+                PerformIntegrityRepair();
+                PrintSelfDiagnostics();
+                _integrityCheckCompleted = true;
+            }
+
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+
             // Process all alliances involving this clan
             var relevantAlliances = _alliances.Where(a =>
                 a.IsActive &&
@@ -72,7 +159,11 @@ namespace SecretAlliances
 
             foreach (var alliance in relevantAlliances)
             {
-                EvaluateAlliance(alliance);
+                // Enhanced alliance evaluation with new systems
+                EvaluateAllianceEnhanced(alliance, currentDay);
+
+                // Process operations scheduler
+                ProcessOperationsScheduler(alliance, currentDay);
 
                 // Process pact effects
                 ProcessTradePactEffects(alliance);
@@ -83,22 +174,31 @@ namespace SecretAlliances
                 {
                     alliance.CooldownDays--;
                 }
+
+                // Process aging and dissolution
+                ProcessAgingAndDissolution(alliance, currentDay);
             }
 
-            // Check for new alliance opportunities (AI consideration)
-            if (MBRandom.RandomFloat < 0.1f)
-            {
-                ConsiderNewAlliances(clan);
-            }
-
-            // Process intelligence aging daily
-            ProcessIntelligence();
-
-            // Process coalition cohesion (once per day, triggered by first clan)
+            // Formation AI - triggered by first clan of the day
             if (clan == Clan.All.FirstOrDefault())
             {
+                ProcessFormationAI(currentDay);
+                
+                // Process coalition cohesion
                 CalculateCoalitionCohesion();
                 ProcessOperationsScaffolding();
+
+                // Process intel aging
+                ProcessIntelligenceAging();
+
+                // Process forced reveals
+                ProcessForcedReveals(currentDay);
+            }
+
+            // Check for new alliance opportunities (reduced frequency)
+            if (MBRandom.RandomFloat < (_config?.FormationBaseChance ?? 0.07f) * 0.1f)
+            {
+                ConsiderNewAlliances(clan);
             }
         }
 
