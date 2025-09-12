@@ -21,6 +21,12 @@ namespace SecretAlliances
             GroupId = 0;
             LastInteractionDay = 0;
             CooldownDays = 0;
+
+            // Initialize expanded functionality fields
+            LastOperationDay = 0;
+            PendingOperationType = 0;
+            GroupSecrecyCache = 0f;
+            GroupStrengthCache = 0f;
         }
 
         [SaveableField(1)] public MBGUID InitiatorClanId;
@@ -58,6 +64,12 @@ namespace SecretAlliances
         [SaveableField(26)] public bool MilitaryPact;
         [SaveableField(27)] public int GroupId;
 
+        // New fields for expanded functionality (append only for save compatibility)
+        [SaveableField(28)] public int LastOperationDay;
+        [SaveableField(29)] public int PendingOperationType;
+        [SaveableField(30)] public float GroupSecrecyCache;
+        [SaveableField(31)] public float GroupStrengthCache;
+
 
 
         public Clan GetInitiatorClan()
@@ -83,7 +95,22 @@ namespace SecretAlliances
         [SaveableField(5)] public bool IsConfirmed;
         [SaveableField(6)] public float SeverityLevel;
 
+        // New fields for proper clan pair tracking (append only for save compatibility)
+        [SaveableField(7)] public MBGUID ClanAId;
+        [SaveableField(8)] public MBGUID ClanBId;
+        [SaveableField(9)] public int IntelCategory;
+
         public Hero GetInformer()
             => MBObjectManager.Instance.GetObject<Hero>(h => h.Id == InformerHeroId);
+    }
+
+    // Enum for intelligence categorization (mapped to int for save safety)
+    public enum AllianceIntelType
+    {
+        GeneralRumor = 0,
+        TradePactEvidence = 1,
+        MilitaryCoordination = 2,
+        SecretMeeting = 3,
+        BetrayalPlot = 4
     }
 }
