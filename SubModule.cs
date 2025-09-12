@@ -46,6 +46,11 @@ namespace SecretAlliances
                 if (_allianceBehavior != null)
                 {
                     AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                    
+                    // Run implementation test in debug builds
+                    #if DEBUG
+                    ImplementationTest.RunBasicFunctionalityTest(_allianceBehavior);
+                    #endif
                 }
             }
         }
@@ -316,8 +321,11 @@ namespace SecretAlliances
 
         private bool CanGatherIntelligence()
         {
-            // Can gather intel if this hero might know about secret alliances
-            return true; // Always show option, but may not have rumors
+            // Enhanced rumor gating (Former PR 6) - only show if alliance requirements are met
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero == null) return false;
+
+            return _allianceBehavior?.ShouldShowRumorOption(targetHero) ?? false;
         }
 
         private bool HasRumorsToShare()
