@@ -33,6 +33,18 @@ namespace SecretAlliances
             BetrayalCooldownDays = 0;
             CounterIntelBuffExpiryDay = 0;
             BetrayalEscalationCounter = 0f;
+
+            // Initialize advanced alliance features
+            AllianceRank = 0;
+            ContractExpiryDay = 0;
+            ReputationScore = 0.5f;
+            JointCampaignCount = 0;
+            DiplomaticImmunity = false;
+            EconomicIntegration = 0f;
+            SpyNetworkLevel = 0;
+            MarriageAlliance = false;
+            TerritoryAgreementType = 0;
+            MilitaryCoordination = 0f;
         }
 
         [SaveableField(1)] public MBGUID InitiatorClanId;
@@ -81,6 +93,18 @@ namespace SecretAlliances
         [SaveableField(33)] public int BetrayalCooldownDays;
         [SaveableField(34)] public int CounterIntelBuffExpiryDay;
         [SaveableField(35)] public float BetrayalEscalationCounter;
+
+        // Advanced alliance features (indices 36+)
+        [SaveableField(36)] public int AllianceRank; // 0=Basic, 1=Advanced, 2=Strategic
+        [SaveableField(37)] public int ContractExpiryDay; // Time-limited contracts
+        [SaveableField(38)] public float ReputationScore; // Alliance reliability
+        [SaveableField(39)] public int JointCampaignCount; // Number of joint military actions
+        [SaveableField(40)] public bool DiplomaticImmunity; // Protection from hostile actions
+        [SaveableField(41)] public float EconomicIntegration; // Trade network strength
+        [SaveableField(42)] public int SpyNetworkLevel; // Intelligence network tier
+        [SaveableField(43)] public bool MarriageAlliance; // Royal marriage connection
+        [SaveableField(44)] public int TerritoryAgreementType; // Border/expansion agreements
+        [SaveableField(45)] public float MilitaryCoordination; // Battle cooperation level
 
 
 
@@ -131,13 +155,26 @@ namespace SecretAlliances
         Trade = 9
     }
 
-    // Helper class for trade transfer tracking (not persisted)
+    // Helper class for trade transfer tracking (now persisted)
+    [Serializable]
     public class TradeTransferRecord
     {
-        public int Day { get; set; }
-        public int Amount { get; set; }
-        public MBGUID FromClan { get; set; }
-        public MBGUID ToClan { get; set; }
+        [SaveableField(1)] public int Day;
+        [SaveableField(2)] public int Amount;
+        [SaveableField(3)] public MBGUID FromClan;
+        [SaveableField(4)] public MBGUID ToClan;
+        [SaveableField(5)] public int TransferType; // 0=Gold, 1=Goods, 2=Services
+        [SaveableField(6)] public bool IsCovert;
+
+        public TradeTransferRecord()
+        {
+            Day = 0;
+            Amount = 0;
+            FromClan = MBGUID.Empty;
+            ToClan = MBGUID.Empty;
+            TransferType = 0;
+            IsCovert = false;
+        }
     }
 
     // Operation types enumeration
@@ -148,6 +185,93 @@ namespace SecretAlliances
         SpyProbe = 2,
         RecruitmentFeelers = 3,
         SabotageRaid = 4,
-        CounterIntelligence = 5
+        CounterIntelligence = 5,
+        // Advanced operations
+        DiplomaticMission = 6,
+        EconomicWarfare = 7,
+        InformationNetworking = 8,
+        JointCampaign = 9,
+        MarriageNegotiation = 10,
+        TerritoryNegotiation = 11,
+        TradeNetworkExpansion = 12,
+        MilitaryTraining = 13,
+        RoyalInfluence = 14,
+        CulturalExchange = 15
+    }
+
+    // Alliance contract types
+    [Serializable]
+    public class AllianceContract
+    {
+        [SaveableField(1)] public MBGUID AllianceId;
+        [SaveableField(2)] public int ContractType; // 0=Mutual Defense, 1=Trade, 2=Military Support, etc.
+        [SaveableField(3)] public int ExpirationDay;
+        [SaveableField(4)] public float ContractValue; // Gold or resource value
+        [SaveableField(5)] public bool AutoRenew;
+        [SaveableField(6)] public int ViolationCount;
+        [SaveableField(7)] public float PenaltyClause;
+        [SaveableField(8)] public List<MBGUID> WitnessClans;
+
+        public AllianceContract()
+        {
+            WitnessClans = new List<MBGUID>();
+        }
+
+        public bool IsExpired() => CampaignTime.Now.GetDayOfYear >= ExpirationDay;
+        public bool IsValid() => !IsExpired() && ViolationCount < 3;
+    }
+
+    // Military coordination data
+    [Serializable]
+    public class MilitaryCoordinationData
+    {
+        [SaveableField(1)] public MBGUID AllianceId;
+        [SaveableField(2)] public int CoordinationLevel; // 0-5 coordination tiers
+        [SaveableField(3)] public List<MBGUID> SharedFormations;
+        [SaveableField(4)] public int LastJointBattleDay;
+        [SaveableField(5)] public float CombatEfficiencyBonus;
+        [SaveableField(6)] public bool EliteUnitExchange;
+        [SaveableField(7)] public int FortressNetworkAccess;
+
+        public MilitaryCoordinationData()
+        {
+            SharedFormations = new List<MBGUID>();
+        }
+    }
+
+    // Economic network data
+    [Serializable]
+    public class EconomicNetworkData
+    {
+        [SaveableField(1)] public MBGUID AllianceId;
+        [SaveableField(2)] public float TradeVolumeMultiplier;
+        [SaveableField(3)] public List<MBGUID> SharedRoutes;
+        [SaveableField(4)] public int CaravanProtectionLevel;
+        [SaveableField(5)] public float ResourceSharingRatio;
+        [SaveableField(6)] public bool PriceManipulationAccess;
+        [SaveableField(7)] public int EconomicWarfareCapability;
+
+        public EconomicNetworkData()
+        {
+            SharedRoutes = new List<MBGUID>();
+        }
+    }
+
+    // Spy network data
+    [Serializable]
+    public class SpyNetworkData
+    {
+        [SaveableField(1)] public MBGUID AllianceId;
+        [SaveableField(2)] public int NetworkTier; // 1-5 network sophistication
+        [SaveableField(3)] public List<MBGUID> EmbeddedAgents;
+        [SaveableField(4)] public int CounterIntelDefense;
+        [SaveableField(5)] public float InformationQuality;
+        [SaveableField(6)] public bool DoubleAgentCapability;
+        [SaveableField(7)] public int LastSuccessfulOperation;
+
+        public SpyNetworkData()
+        {
+            EmbeddedAgents = new List<MBGUID>();
+        }
     }
 }
