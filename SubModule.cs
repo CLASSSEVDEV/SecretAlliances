@@ -205,6 +205,24 @@ namespace SecretAlliances
                 () => !HasRumorsToShare(),
                 null);
 
+            // --- ALLIANCE STATUS ---
+            starter.AddPlayerLine(
+                "sa_view_status",
+                "hero_main_options",
+                "sa_status_display",
+                "{=SA_ViewStatus}What is the status of our arrangements?",
+                CanViewAllianceStatus,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_status_display",
+                "sa_status_display",
+                "hero_main_options",
+                "{=SA_StatusDisplay}Let me update you on our current understanding...",
+                () => true,
+                DisplayAllianceStatus);
+
             // --- ALLIANCE MANAGEMENT (for existing allies) ---
             starter.AddPlayerLine(
                 "sa_deepen_pact",
@@ -396,6 +414,54 @@ namespace SecretAlliances
         private bool CanOfferBribe()
         {
             return Hero.MainHero?.Gold >= 1000;
+        }
+
+        private bool CanViewAllianceStatus()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            // Can view status if we have any alliance or if they might have intelligence
+            var hasAlliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan) != null;
+            var hasIntelligence = _allianceBehavior?.ShouldShowRumorOption(targetHero) ?? false;
+            
+            return hasAlliance || hasIntelligence;
+        }
+
+        private void DisplayAllianceStatus()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance != null)
+            {
+                string statusMessage = $"Alliance with {targetHero.Clan.Name}: " +
+                    $"Strength {alliance.Strength:P0}, Trust {alliance.TrustLevel:P0}, " +
+                    $"Secrecy {alliance.Secrecy:P0}";
+
+                if (alliance.TradePact) statusMessage += " [Trade Pact Active]";
+                if (alliance.MilitaryPact) statusMessage += " [Military Pact Active]";
+                if (alliance.IsOnCooldown()) statusMessage += " [On Cooldown]";
+
+                InformationManager.DisplayMessage(new InformationMessage(statusMessage, Colors.Cyan));
+            }
+            else
+            {
+                // Show general intelligence about secret alliances
+                var rumors = _allianceBehavior?.TryGetRumorsForHero(targetHero, Clan.PlayerClan, 2);
+                if (rumors?.Any() == true)
+                {
+                    foreach (var rumor in rumors)
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage($"Intelligence: {rumor}", Colors.Yellow));
+                    }
+                }
+                else
+                {
+                    InformationManager.DisplayMessage(new InformationMessage("No current intelligence about secret alliances.", Colors.Gray));
+                }
+            }
         }
 
         private bool CanGatherIntelligence()
