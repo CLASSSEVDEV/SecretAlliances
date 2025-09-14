@@ -217,14 +217,21 @@ namespace SecretAlliances
             {
                 float formationChance = CalculateFormationChance(clan, candidate);
 
-                if (Config.DebugVerbose && formationChance > 0.05f)
+                // Enhanced debug logging to track AI decision making
+                if (Config.DebugVerbose || formationChance > 0.05f)
                 {
-                    Debug.Print($"[SecretAlliances] Formation chance {clan.Name} -> {candidate.Name}: {formationChance:F3}");
+                    Debug.Print($"[SecretAlliances] AI Formation evaluation {clan.Name} -> {candidate.Name}: " +
+                              $"chance={formationChance:F3}, desperation={CalculateDesperationLevel(clan):F2}, " +
+                              $"commonEnemies={HasCommonEnemies(clan, candidate)}, " +
+                              $"political_pressure={CalculatePoliticalPressure(clan, candidate):F2}");
                 }
 
                 if (MBRandom.RandomFloat < formationChance)
                 {
                     CreateNewAlliance(clan, candidate);
+                    InformationManager.DisplayMessage(new InformationMessage(
+                        $"Intelligence reports suggest {clan.Name} and {candidate.Name} may be coordinating secretly...", 
+                        Colors.Yellow));
                     break; // Only one formation per clan per day
                 }
             }
@@ -1829,20 +1836,25 @@ namespace SecretAlliances
 
                         if (EvaluateSideDefection(mapEvent, sideClan, opposingClan, relevantAlliances))
                         {
-                            // Execute defection (leave with rebellion to simulate switching sides)
-                            if (sideClan.Kingdom != null)
+                            // Execute proper side switching - join the opposing clan's kingdom
+                            if (sideClan.Kingdom != null && opposingClan.Kingdom != null && sideClan.Kingdom != opposingClan.Kingdom)
                             {
-                                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(sideClan, false);
+                                // First leave current kingdom peacefully (no rebellion to avoid becoming hostile)
+                                ChangeKingdomAction.ApplyByLeaveKingdom(sideClan, false);
+                                
+                                // Then join the opposing clan's kingdom as defection
+                                ChangeKingdomAction.ApplyByJoinToKingdomByDefection(sideClan, opposingClan.Kingdom, true);
 
-                                // Apply consequences
+                                // Update alliance strength from successful coordination
                                 foreach (var relevantAlliance in relevantAlliances)
                                 {
-                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.3f);
-                                    relevantAlliance.TrustLevel = MathF.Max(0f, relevantAlliance.TrustLevel - 0.2f);
-                                    relevantAlliance.BetrayalRevealed = true;
+                                    relevantAlliance.Strength += 0.1f; // Reward successful battle coordination
+                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.15f); // Some secrecy loss from public defection
+                                    relevantAlliance.SuccessfulOperations++;
+                                    relevantAlliance.MilitaryCoordination += 0.05f;
                                 }
 
-                                Debug.Print($"[Secret Alliances] Pre-battle defection: {sideClan.Name} switched sides due to secret alliance with {opposingClan.Name}");
+                                Debug.Print($"[Secret Alliances] Battle defection: {sideClan.Name} switched from {sideClan.Kingdom?.Name} to {opposingClan.Kingdom.Name} to help allied clan {opposingClan.Name}");
                             }
                             return; // Only one defection per evaluation
                         }
