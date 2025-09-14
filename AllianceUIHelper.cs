@@ -82,6 +82,28 @@ namespace SecretAlliances
                 info.Add($"  Trade Pact: {alliance.TradePact} | Military Pact: {alliance.MilitaryPact}");
                 info.Add($"  Last Interaction: Day {alliance.LastInteractionDay} | Cooldown: {alliance.CooldownDays} days");
 
+                // Advanced features display
+                if (alliance.AllianceRank > 0)
+                {
+                    info.Add($"  ADVANCED: Rank {alliance.AllianceRank} | Reputation: {alliance.ReputationScore:F2}");
+                    info.Add($"  Economic Integration: {alliance.EconomicIntegration:F2} | Military Coordination: {alliance.MilitaryCoordination:F2}");
+
+                    if (alliance.MarriageAlliance)
+                        info.Add($"  MARRIAGE ALLIANCE");
+
+                    if (alliance.DiplomaticImmunity)
+                        info.Add($"  DIPLOMATIC IMMUNITY");
+
+                    if (alliance.SpyNetworkLevel > 0)
+                        info.Add($"  Spy Network Level: {alliance.SpyNetworkLevel}");
+
+                    if (alliance.TerritoryAgreementType > 0)
+                        info.Add($"  Territory Agreement: Type {alliance.TerritoryAgreementType}");
+
+                    if (alliance.JointCampaignCount > 0)
+                        info.Add($"  Joint Campaigns: {alliance.JointCampaignCount}");
+                }
+
                 if (alliance.IsOnCooldown())
                     info.Add("  STATUS: ON COOLDOWN");
 

@@ -2,6 +2,7 @@
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Conversation;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
@@ -289,6 +290,86 @@ namespace SecretAlliances
                 "{=SA_DissolveNo}Perhaps I spoke hastily.",
                 () => true,
                 () => ResetConversationState());
+
+            // --- ADVANCED ALLIANCE FEATURES ---
+            starter.AddPlayerLine(
+                "sa_upgrade_alliance",
+                "hero_main_options",
+                "sa_upgrade_result",
+                "{=SA_UpgradeAlliance}Our alliance could reach new heights...",
+                CanUpgradeAlliance,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_upgrade_success",
+                "sa_upgrade_result",
+                "hero_main_options",
+                "{=SA_UpgradeSuccess}Indeed, our cooperation shall expand.",
+                () => TryUpgradeCurrentAlliance(),
+                () => ResetConversationState());
+
+            starter.AddDialogLine(
+                "sa_upgrade_failure",
+                "sa_upgrade_result",
+                "hero_main_options",
+                "{=SA_UpgradeFailure}We are not yet ready for such advancement.",
+                () => !TryUpgradeCurrentAlliance(),
+                () => ResetConversationState());
+
+            // --- ECONOMIC WARFARE ---
+            starter.AddPlayerLine(
+                "sa_economic_warfare",
+                "hero_main_options",
+                "sa_economic_target",
+                "{=SA_EconomicWarfare}We should disrupt our enemies' trade...",
+                CanLaunchEconomicWarfare,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_economic_target",
+                "sa_economic_target",
+                "hero_main_options",
+                "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well.",
+                () => true,
+                LaunchEconomicWarfare);
+
+            // --- SPY OPERATIONS ---
+            starter.AddPlayerLine(
+                "sa_spy_operations",
+                "hero_main_options",
+                "sa_spy_target",
+                "{=SA_SpyOperations}Our intelligence network should be more active...",
+                CanLaunchSpyOperation,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_spy_target",
+                "sa_spy_target",
+                "hero_main_options",
+                "{=SA_SpyTarget}Information is indeed the greatest weapon.",
+                () => true,
+                LaunchSpyOperation);
+
+            // --- JOINT CAMPAIGNS ---
+            starter.AddPlayerLine(
+                "sa_joint_campaign",
+                "hero_main_options",
+                "sa_campaign_target",
+                "{=SA_JointCampaign}We should coordinate a military campaign...",
+                CanLaunchJointCampaign,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_campaign_target",
+                "sa_campaign_target",
+                "hero_main_options",
+                "{=SA_CampaignTarget}Our combined forces shall be unstoppable.",
+                () => true,
+                LaunchJointCampaign);
         }
 
 
@@ -675,6 +756,158 @@ namespace SecretAlliances
 
             _allianceBehavior?.TryDissolveAlliance(Clan.PlayerClan, targetHero.Clan, true);
             ResetConversationState();
+        }
+
+        // Advanced feature dialog methods
+        private bool CanUpgradeAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && alliance.AllianceRank < 2 &&
+                   alliance.Strength >= 0.5f && alliance.TrustLevel >= 0.5f && alliance.ReputationScore >= 0.6f;
+        }
+
+        private bool TryUpgradeCurrentAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            return _allianceBehavior?.TryUpgradeAlliance(Clan.PlayerClan, targetHero.Clan) ?? false;
+        }
+
+        private bool CanLaunchEconomicWarfare()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && alliance.TradePact && alliance.EconomicIntegration >= 0.3f;
+        }
+
+        private void LaunchEconomicWarfare()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance == null) return;
+
+            // Find a suitable target (enemy clan)
+            var enemyClan = FindSuitableEconomicTarget(alliance);
+            if (enemyClan != null)
+            {
+                _allianceBehavior.ExecuteEconomicWarfare(alliance, enemyClan);
+                InformationManager.DisplayMessage(new InformationMessage($"Economic warfare launched against {enemyClan.Name}!", Colors.Yellow));
+            }
+        }
+
+        private bool CanLaunchSpyOperation()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && alliance.SpyNetworkLevel >= 2;
+        }
+
+        private void LaunchSpyOperation()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance == null) return;
+
+            // Find a suitable target (enemy clan)
+            var enemyClan = FindSuitableSpyTarget(alliance);
+            if (enemyClan != null)
+            {
+                bool success = _allianceBehavior.ExecuteSpyOperation(alliance, enemyClan, 1); // Information gathering
+                if (success)
+                {
+                    InformationManager.DisplayMessage(new InformationMessage($"Spy operation successful against {enemyClan.Name}!", Colors.Green));
+                }
+                else
+                {
+                    InformationManager.DisplayMessage(new InformationMessage($"Spy operation failed against {enemyClan.Name}.", Colors.Red));
+                }
+            }
+        }
+
+        private bool CanLaunchJointCampaign()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && alliance.MilitaryPact &&
+                   alliance.MilitaryCoordination >= 0.3f && alliance.AllianceRank >= 1;
+        }
+
+        private void LaunchJointCampaign()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance == null) return;
+
+            // Find a suitable target settlement
+            var targetSettlement = FindSuitableCampaignTarget(alliance);
+            if (targetSettlement != null)
+            {
+                _allianceBehavior.InitiateJointCampaign(alliance, targetSettlement);
+                InformationManager.DisplayMessage(new InformationMessage($"Joint campaign launched against {targetSettlement.Name}!", Colors.Blue));
+            }
+        }
+
+        // Helper methods for finding suitable targets
+        private Clan FindSuitableEconomicTarget(SecretAllianceRecord alliance)
+        {
+            var playerClan = Clan.PlayerClan;
+            var allyClan = alliance.InitiatorClanId == playerClan.Id ? alliance.GetTargetClan() : alliance.GetInitiatorClan();
+
+            // Find clans that are enemies of both player and ally
+            return Clan.All
+                .Where(c => !c.IsEliminated && c != playerClan && c != allyClan)
+                .Where(c => c.Kingdom != null && (
+                    (playerClan.Kingdom?.IsAtWarWith(c.Kingdom) == true) ||
+                    (allyClan?.Kingdom?.IsAtWarWith(c.Kingdom) == true)))
+                .Where(c => c.Gold > 5000) // Target wealthy clans
+                .OrderByDescending(c => c.Gold)
+                .FirstOrDefault();
+        }
+
+        private Clan FindSuitableSpyTarget(SecretAllianceRecord alliance)
+        {
+            var playerClan = Clan.PlayerClan;
+            var allyClan = alliance.InitiatorClanId == playerClan.Id ? alliance.GetTargetClan() : alliance.GetInitiatorClan();
+
+            // Find clans that could provide valuable intelligence
+            return Clan.All
+                .Where(c => !c.IsEliminated && c != playerClan && c != allyClan)
+                .Where(c => c.Kingdom != null)
+                .Where(c => c.TotalStrength > 50f) // Target militarily significant clans
+                .OrderByDescending(c => c.TotalStrength)
+                .FirstOrDefault();
+        }
+
+        private Settlement FindSuitableCampaignTarget(SecretAllianceRecord alliance)
+        {
+            var playerClan = Clan.PlayerClan;
+            var allyClan = alliance.InitiatorClanId == playerClan.Id ? alliance.GetTargetClan() : alliance.GetInitiatorClan();
+
+            // Find enemy settlements that are viable targets
+            return Settlement.All
+                .Where(s => s.IsFortification && s.OwnerClan != null)
+                .Where(s => s.OwnerClan != playerClan && s.OwnerClan != allyClan)
+                .Where(s => playerClan.Kingdom?.IsAtWarWith(s.OwnerClan.Kingdom) == true ||
+                           allyClan?.Kingdom?.IsAtWarWith(s.OwnerClan.Kingdom) == true)
+                .Where(s => s.Position2D.DistanceSquared(playerClan.FactionMidSettlement?.Position2D ?? TaleWorlds.Library.Vec2.Zero) < 10000) // Within reasonable distance
+                .OrderBy(s => s.Town?.Prosperity ?? s.Village?.Hearth ?? 1000f) // Target weaker settlements first
+                .FirstOrDefault();
         }
     }
 }

@@ -30,6 +30,44 @@ namespace SecretAlliances
         public float CoupSecrecyThreshold { get; set; } = 0.25f;
         public float CoupStrengthThreshold { get; set; } = 0.65f;
 
+        // Advanced feature configurations
+        public int MaxAllianceRank { get; set; } = 2;
+        public int ContractMinDuration { get; set; } = 30;
+        public int ContractMaxDuration { get; set; } = 365;
+        public float ReputationDecayRate { get; set; } = 0.001f;
+        public float ReputationGainMultiplier { get; set; } = 1.0f;
+
+        // Military coordination settings
+        public float MilitaryCoordinationMaxBonus { get; set; } = 0.25f;
+        public int EliteUnitExchangeMinRank { get; set; } = 1;
+        public int FortressNetworkMinRank { get; set; } = 2;
+        public float JointCampaignEfficiencyBonus { get; set; } = 0.15f;
+
+        // Economic network settings
+        public float TradeNetworkMaxMultiplier { get; set; } = 2.0f;
+        public float ResourceSharingMaxRatio { get; set; } = 0.3f;
+        public int CaravanProtectionMaxLevel { get; set; } = 5;
+        public float EconomicWarfareEffectiveness { get; set; } = 0.2f;
+
+        // Espionage system settings
+        public int MaxSpyNetworkTier { get; set; } = 5;
+        public float SpyNetworkDetectionChance { get; set; } = 0.1f;
+        public float CounterIntelSuccessRate { get; set; } = 0.6f;
+        public int DoubleAgentMinTier { get; set; } = 3;
+
+        // Diplomatic features
+        public float DiplomaticMissionSuccessRate { get; set; } = 0.7f;
+        public int MarriageAllianceInfluenceBonus { get; set; } = 20;
+        public float TerritoryAgreementStabilityBonus { get; set; } = 0.1f;
+        public int RoyalInfluenceMaxGain { get; set; } = 50;
+
+        // Performance and balance
+        public int MaxActiveContracts { get; set; } = 100;
+        public bool EnableAdvancedFeatures { get; set; } = true;
+        public float AdvancedFeatureUnlockThreshold { get; set; } = 0.5f;
+        public bool EnableEconomicWarfare { get; set; } = true;
+        public bool EnableSpyNetworks { get; set; } = true;
+
         private static AllianceConfig _instance;
         private static readonly object _lock = new object();
 
@@ -149,6 +187,41 @@ namespace SecretAlliances
             RecruitmentCooldownDays = Math.Max(1, RecruitmentCooldownDays);
             ForcedRevealStrengthThreshold = MathF.Max(0f, MathF.Min(1f, ForcedRevealStrengthThreshold));
             ForcedRevealSecrecyThreshold = MathF.Max(0f, MathF.Min(1f, ForcedRevealSecrecyThreshold));
+
+            // Validate advanced feature settings
+            MaxAllianceRank = Math.Max(0, Math.Min(5, MaxAllianceRank));
+            ContractMinDuration = Math.Max(1, ContractMinDuration);
+            ContractMaxDuration = Math.Max(ContractMinDuration, ContractMaxDuration);
+            ReputationDecayRate = MathF.Max(0f, MathF.Min(0.1f, ReputationDecayRate));
+            ReputationGainMultiplier = MathF.Max(0.1f, MathF.Min(5f, ReputationGainMultiplier));
+
+            // Military coordination validation
+            MilitaryCoordinationMaxBonus = MathF.Max(0f, MathF.Min(1f, MilitaryCoordinationMaxBonus));
+            EliteUnitExchangeMinRank = Math.Max(0, Math.Min(MaxAllianceRank, EliteUnitExchangeMinRank));
+            FortressNetworkMinRank = Math.Max(0, Math.Min(MaxAllianceRank, FortressNetworkMinRank));
+            JointCampaignEfficiencyBonus = MathF.Max(0f, MathF.Min(1f, JointCampaignEfficiencyBonus));
+
+            // Economic network validation
+            TradeNetworkMaxMultiplier = MathF.Max(1f, MathF.Min(5f, TradeNetworkMaxMultiplier));
+            ResourceSharingMaxRatio = MathF.Max(0f, MathF.Min(1f, ResourceSharingMaxRatio));
+            CaravanProtectionMaxLevel = Math.Max(1, Math.Min(10, CaravanProtectionMaxLevel));
+            EconomicWarfareEffectiveness = MathF.Max(0f, MathF.Min(1f, EconomicWarfareEffectiveness));
+
+            // Espionage system validation
+            MaxSpyNetworkTier = Math.Max(1, Math.Min(10, MaxSpyNetworkTier));
+            SpyNetworkDetectionChance = MathF.Max(0f, MathF.Min(1f, SpyNetworkDetectionChance));
+            CounterIntelSuccessRate = MathF.Max(0f, MathF.Min(1f, CounterIntelSuccessRate));
+            DoubleAgentMinTier = Math.Max(1, Math.Min(MaxSpyNetworkTier, DoubleAgentMinTier));
+
+            // Diplomatic validation
+            DiplomaticMissionSuccessRate = MathF.Max(0f, MathF.Min(1f, DiplomaticMissionSuccessRate));
+            MarriageAllianceInfluenceBonus = Math.Max(0, MarriageAllianceInfluenceBonus);
+            TerritoryAgreementStabilityBonus = MathF.Max(0f, MathF.Min(1f, TerritoryAgreementStabilityBonus));
+            RoyalInfluenceMaxGain = Math.Max(0, RoyalInfluenceMaxGain);
+
+            // Performance validation
+            MaxActiveContracts = Math.Max(10, MaxActiveContracts);
+            AdvancedFeatureUnlockThreshold = MathF.Max(0f, MathF.Min(1f, AdvancedFeatureUnlockThreshold));
         }
     }
 }

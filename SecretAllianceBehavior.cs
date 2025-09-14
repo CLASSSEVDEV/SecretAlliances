@@ -12,6 +12,7 @@ using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 using TaleWorlds.SaveSystem;
+using SecretAlliances.Infrastructure;
 
 namespace SecretAlliances
 {
@@ -19,6 +20,12 @@ namespace SecretAlliances
     {
         private List<SecretAllianceRecord> _alliances = new List<SecretAllianceRecord>();
         private List<AllianceIntelligence> _intelligence = new List<AllianceIntelligence>();
+
+        // Advanced feature data collections
+        private List<AllianceContract> _contracts = new List<AllianceContract>();
+        private List<MilitaryCoordinationData> _militaryData = new List<MilitaryCoordinationData>();
+        private List<EconomicNetworkData> _economicData = new List<EconomicNetworkData>();
+        private List<SpyNetworkData> _spyData = new List<SpyNetworkData>();
 
         private int _nextGroupId = 1; // For coalition support
         private bool _hasRunFirstDayDiagnostics = false;
@@ -29,6 +36,11 @@ namespace SecretAlliances
 
         // Trade transfer tracking for magnitude percentile calculations
         private Dictionary<MBGUID, List<TradeTransferRecord>> _recentTransfers = new Dictionary<MBGUID, List<TradeTransferRecord>>();
+
+        // Advanced feature caches for performance
+        private Dictionary<MBGUID, float> _allianceInfluenceCache = new Dictionary<MBGUID, float>();
+        private Dictionary<MBGUID, int> _diplomaticImmunityCache = new Dictionary<MBGUID, int>();
+        private int _lastCacheUpdateDay = -1;
 
         // Configuration constants - replaced by dynamic config
         private AllianceConfig Config => AllianceConfig.Instance;
@@ -43,7 +55,6 @@ namespace SecretAlliances
             CampaignEvents.MapEventEnded.AddNonSerializedListener(this, OnBattleEnded);
 
             // Political events
-            // AFTER
             CampaignEvents.OnClanChangedKingdomEvent.AddNonSerializedListener(this, OnClanChangedKingdom);
             CampaignEvents.KingdomDestroyedEvent.AddNonSerializedListener(this, OnKingdomDestroyed);
 
@@ -54,8 +65,14 @@ namespace SecretAlliances
             CampaignEvents.WarDeclared.AddNonSerializedListener(this, OnWarDeclared);
             CampaignEvents.MakePeace.AddNonSerializedListener(this, OnPeaceDeclared);
 
-
-
+            // Additional events for advanced features
+            CampaignEvents.HeroesMarried.AddNonSerializedListener(this, OnHeroMarried);
+            CampaignEvents.OnSettlementOwnerChangedEvent.AddNonSerializedListener(this, OnSettlementOwnerChanged);
+            CampaignEvents.OnCaravanTransactionCompletedEvent.AddNonSerializedListener(this, OnCaravanTransaction);
+            CampaignEvents.HeroPrisonerTaken.AddNonSerializedListener(this, OnHeroPrisonerTaken);
+            CampaignEvents.HeroPrisonerReleased.AddNonSerializedListener(this, OnHeroPrisonerReleased);
+            CampaignEvents.VillageBeingRaided.AddNonSerializedListener(this, OnVillageRaided);
+            CampaignEvents.RaidCompletedEvent.AddNonSerializedListener(this, OnRaidCompleted);
         }
 
         public override void SyncData(IDataStore dataStore)
@@ -63,6 +80,10 @@ namespace SecretAlliances
             dataStore.SyncData("SecretAlliances_Alliances", ref _alliances);
             dataStore.SyncData("SecretAlliances_Intelligence", ref _intelligence);
             dataStore.SyncData("SecretAlliances_NextGroupId", ref _nextGroupId);
+            dataStore.SyncData("SecretAlliances_Contracts", ref _contracts);
+            dataStore.SyncData("SecretAlliances_MilitaryData", ref _militaryData);
+            dataStore.SyncData("SecretAlliances_EconomicData", ref _economicData);
+            dataStore.SyncData("SecretAlliances_SpyData", ref _spyData);
         }
 
         private void OnDailyTickClan(Clan clan)
@@ -121,6 +142,15 @@ namespace SecretAlliances
                 ProcessForcedRevealMechanics();
                 ProcessBetrayalEvaluations();
                 CleanupOldData();
+
+                // Advanced feature processing
+                if (Config.EnableAdvancedFeatures)
+                {
+                    ProcessAdvancedFeatures();
+                    ProcessContractManagement();
+                    ProcessReputationDecay();
+                    ProcessAllianceRankProgression();
+                }
             }
         }
 
@@ -224,7 +254,7 @@ namespace SecretAlliances
             return MathF.Min(finalChance, 0.5f); // Cap at 50%
         }
 
-        
+
 
         private float CalculateMilitaryPowerFactor(Clan clan1, Clan clan2)
         {
@@ -247,7 +277,7 @@ namespace SecretAlliances
             }
         }
 
-        
+
         private void CreateNewAlliance(Clan initiator, Clan target)
         {
             var alliance = new SecretAllianceRecord
@@ -2155,6 +2185,171 @@ namespace SecretAlliances
             }
         }
 
+        // Advanced event handlers for new features
+        private void OnHeroMarried(Hero hero, Hero spouse, bool _)
+        {
+            if (hero?.Clan == null || spouse?.Clan == null || hero.Clan == spouse.Clan) return;
+
+            var alliance = FindAlliance(hero.Clan, spouse.Clan);
+            if (alliance != null)
+            {
+                alliance.MarriageAlliance = true;
+                alliance.Strength += 0.15f;
+                alliance.TrustLevel += 0.1f;
+                alliance.ReputationScore += 0.05f;
+                Debug.Print($"[SecretAlliances] Marriage alliance formed between {hero.Clan.Name} and {spouse.Clan.Name}");
+            }
+            else if (Config.EnableAdvancedFeatures && MBRandom.RandomFloat < 0.3f)
+            {
+                CreateAlliance(hero.Clan, spouse.Clan, 0.85f, 0.2f);
+                // Optional: you can mark it as a marriage alliance after creation if you keep a ref
+            }
+        }
+
+        private void OnSettlementOwnerChanged(Settlement settlement,bool _,Hero newOwner,Hero oldOwner,Hero capturerHero,ChangeOwnerOfSettlementAction.ChangeOwnerOfSettlementDetail detail)
+        {
+            if (newOwner?.Clan == null) return;
+
+            var relevantAlliances = _alliances.Where(a => a.IsActive &&
+                (a.InitiatorClanId == newOwner.Clan.Id || a.TargetClanId == newOwner.Clan.Id) &&
+                a.TerritoryAgreementType > 0).ToList();
+
+            foreach (var alliance in relevantAlliances)
+            {
+                var otherClan = alliance.InitiatorClanId == newOwner.Clan.Id
+                    ? alliance.GetTargetClan()
+                    : alliance.GetInitiatorClan();
+
+                if (otherClan != null)
+                {
+                    if (detail == ChangeOwnerOfSettlementAction.ChangeOwnerOfSettlementDetail.BySiege ||
+                        detail == ChangeOwnerOfSettlementAction.ChangeOwnerOfSettlementDetail.ByRebellion)
+                    {
+                        alliance.JointCampaignCount++;
+                        alliance.MilitaryCoordination += 0.05f;
+                    }
+
+                    alliance.ReputationScore += 0.02f;
+                }
+            }
+        }
+
+
+        private void OnCaravanTransaction(MobileParty caravan, Town town, List<(EquipmentElement, int)> tradedItems)
+        {
+            var caravanClan = caravan?.LeaderHero?.Clan;
+            var townOwnerClan = town?.Settlement?.OwnerClan;
+            if (caravanClan == null || townOwnerClan == null) return;
+
+            // Derive a transaction magnitude from item quantities (v1.2.9 does not provide gold directly here)
+            int transactionMagnitude = tradedItems?.Sum(t => Math.Abs(t.Item2)) ?? 0;
+
+            var transferRecord = new TradeTransferRecord
+            {
+                FromClan = caravanClan.Id,
+                ToClan = townOwnerClan.Id,
+                Day = CampaignTime.Now.GetDayOfYear,
+                Amount = transactionMagnitude, // use magnitude as Amount
+                TransferType = 1, // Goods
+                IsCovert = false
+            };
+
+            if (!_recentTransfers.ContainsKey(caravanClan.Id))
+                _recentTransfers[caravanClan.Id] = new List<TradeTransferRecord>();
+
+            _recentTransfers[caravanClan.Id].Add(transferRecord);
+
+            var alliance = FindAlliance(caravanClan, townOwnerClan);
+            if (alliance?.TradePact == true)
+            {
+                alliance.EconomicIntegration += 0.001f;
+                alliance.ReputationScore += 0.001f;
+            }
+        }
+
+
+
+        private void OnHeroPrisonerTaken(PartyBase capturer, Hero prisoner)
+        {
+            if (prisoner?.Clan == null || capturer?.LeaderHero?.Clan == null) return;
+
+            // Check if prisoner is from an allied clan
+            var alliance = FindAlliance(capturer.LeaderHero.Clan, prisoner.Clan);
+            if (alliance != null)
+            {
+                // Taking ally prisoner damages alliance
+                alliance.TrustLevel -= 0.1f;
+                alliance.ReputationScore -= 0.05f;
+                if (alliance.DiplomaticImmunity)
+                {
+                    alliance.TrustLevel -= 0.2f; // Extra penalty for violating immunity
+                }
+            }
+
+            // Check for spy network implications
+            var spyData = _spyData.FirstOrDefault(s => s.EmbeddedAgents.Contains(prisoner.Id));
+            if (spyData != null)
+            {
+                // Spy captured - damage to network
+                spyData.EmbeddedAgents.Remove(prisoner.Id);
+                spyData.CounterIntelDefense -= 10;
+            }
+        }
+
+        private void OnHeroPrisonerReleased(Hero prisoner, PartyBase party, IFaction capturerFaction, EndCaptivityDetail detail)
+        {
+            if (prisoner?.Clan == null || party?.LeaderHero?.Clan == null) return;
+
+            var alliance = FindAlliance(party.LeaderHero.Clan, prisoner.Clan);
+            if (alliance != null && detail != EndCaptivityDetail.Ransom)
+            {
+                // Releasing ally without ransom improves alliance
+                alliance.TrustLevel += 0.05f;
+                alliance.ReputationScore += 0.03f;
+            }
+        }
+
+        private void OnVillageRaided(Village village)
+        {
+            
+            
+        }
+
+
+
+        private void OnRaidCompleted(BattleSideEnum winnerSide, RaidEventComponent raidEvent)
+        {
+            if (raidEvent?.MapEvent?.AttackerSide?.LeaderParty?.LeaderHero?.Clan == null) return;
+
+            var raiderClan = raidEvent.MapEvent.AttackerSide.LeaderParty.LeaderHero.Clan;
+            var targetSettlement = raidEvent.MapEvent.MapEventSettlement;
+
+            if (targetSettlement?.OwnerClan != null)
+            {
+                var targetClan = targetSettlement.OwnerClan;
+
+                // If the raider attacked an allied clan, apply penalties
+                var allianceWithTarget = FindAlliance(raiderClan, targetClan);
+                if (allianceWithTarget != null)
+                {
+                    allianceWithTarget.TrustLevel -= 0.15f;
+                    allianceWithTarget.Strength -= 0.1f;
+                    allianceWithTarget.ReputationScore -= 0.1f;
+                }
+
+                // Your existing “successful raids vs common enemies improve coordination”
+                var alliances = _alliances.Where(a => a.IsActive &&
+                    (a.InitiatorClanId == raiderClan.Id || a.TargetClanId == raiderClan.Id) &&
+                    a.HasCommonEnemies).ToList();
+
+                foreach (var alliance in alliances)
+                {
+                    alliance.MilitaryCoordination += 0.02f;
+                    alliance.SuccessfulOperations++;
+                }
+            }
+        }
+
         // Public interface methods
         public void CreateAlliance(Clan initiator, Clan target, float initialSecrecy = 0.8f,
             float initialStrength = 0.1f, float bribe = 0f, int groupId = 0)
@@ -2634,7 +2829,7 @@ namespace SecretAlliances
         }
 
         // Coalition cohesion calculations
-        
+
 
         // Forced reveal mechanics
         private void ProcessForcedRevealMechanics()
@@ -2761,6 +2956,155 @@ namespace SecretAlliances
                 {
                     _operationCooldowns[kvp.Key] = validCooldowns;
                 }
+            }
+        }
+
+        // Advanced feature processing methods
+        private void ProcessAdvancedFeatures()
+        {
+            foreach (var alliance in _alliances.Where(a => a.IsActive))
+            {
+                // Process military coordination improvements
+                ProcessMilitaryCoordination(alliance);
+
+                // Process economic network growth
+                ProcessEconomicNetwork(alliance);
+
+                // Process spy network development
+                ProcessSpyNetwork(alliance);
+
+                // Update reputation naturally over time
+                UpdateReputationScore(alliance, Config.ReputationDecayRate * (alliance.TrustLevel - 0.5f));
+            }
+        }
+
+        private void ProcessContractManagement()
+        {
+            var currentDay = CampaignTime.Now.GetDayOfYear;
+            var expiredContracts = _contracts.Where(c => c.IsExpired()).ToList();
+
+            foreach (var contract in expiredContracts)
+            {
+                if (contract.AutoRenew && contract.ViolationCount == 0)
+                {
+                    // Auto-renew successful contracts
+                    contract.ExpirationDay = currentDay + Config.ContractMinDuration;
+                    contract.ContractValue *= 0.9f; // Slight reduction for renewal
+                }
+                else
+                {
+                    // Remove expired contracts
+                    _contracts.Remove(contract);
+                    var alliance = GetAllianceById(contract.AllianceId);
+                    if (alliance != null)
+                    {
+                        alliance.ReputationScore += 0.02f; // Small reputation gain for completion
+                    }
+                }
+            }
+        }
+
+        private void ProcessReputationDecay()
+        {
+            foreach (var alliance in _alliances.Where(a => a.IsActive))
+            {
+                // Natural reputation decay over time
+                alliance.ReputationScore = MathF.Max(0f, alliance.ReputationScore - Config.ReputationDecayRate);
+            }
+        }
+
+        private void ProcessAllianceRankProgression()
+        {
+            foreach (var alliance in _alliances.Where(a => a.IsActive && a.AllianceRank < Config.MaxAllianceRank))
+            {
+                // Check for automatic rank progression
+                if (MBRandom.RandomFloat < 0.01f) // 1% chance per day for eligible alliances
+                {
+                    var clanA = alliance.GetInitiatorClan();
+                    var clanB = alliance.GetTargetClan();
+                    if (clanA != null && clanB != null)
+                    {
+                        TryUpgradeAlliance(clanA, clanB);
+                    }
+                }
+            }
+        }
+
+        private void ProcessMilitaryCoordination(SecretAllianceRecord alliance)
+        {
+            if (!alliance.MilitaryPact) return;
+
+            var militaryData = EnsureMilitaryData(alliance);
+            var clanA = alliance.GetInitiatorClan();
+            var clanB = alliance.GetTargetClan();
+
+            if (clanA == null || clanB == null) return;
+
+            // Improve coordination based on joint activities
+            if (alliance.JointCampaignCount > militaryData.CoordinationLevel * 2)
+            {
+                militaryData.CoordinationLevel = Math.Min(5, militaryData.CoordinationLevel + 1);
+                militaryData.CombatEfficiencyBonus = Math.Min(Config.MilitaryCoordinationMaxBonus,
+                    militaryData.CombatEfficiencyBonus + 0.02f);
+            }
+
+            // Update alliance's military coordination field
+            alliance.MilitaryCoordination = militaryData.CoordinationLevel / 5f;
+        }
+
+        private void ProcessEconomicNetwork(SecretAllianceRecord alliance)
+        {
+            if (!alliance.TradePact) return;
+
+            var economicData = EnsureEconomicData(alliance);
+            var clanA = alliance.GetInitiatorClan();
+            var clanB = alliance.GetTargetClan();
+
+            if (clanA == null || clanB == null) return;
+
+            // Calculate trade volume between clans
+            var tradesA = _recentTransfers.GetValueOrDefault(clanA.Id, new List<TradeTransferRecord>());
+            var tradesB = _recentTransfers.GetValueOrDefault(clanB.Id, new List<TradeTransferRecord>());
+
+            int mutualTrades = tradesA.Count(t => t.ToClan == clanB.Id) + tradesB.Count(t => t.ToClan == clanA.Id);
+
+            if (mutualTrades > 0)
+            {
+                alliance.EconomicIntegration += 0.005f * mutualTrades;
+                alliance.EconomicIntegration = Math.Min(1f, alliance.EconomicIntegration);
+
+                economicData.TradeVolumeMultiplier = Math.Min(Config.TradeNetworkMaxMultiplier,
+                    1f + (alliance.EconomicIntegration * 0.5f));
+
+                // Increase economic warfare capability over time
+                if (alliance.EconomicIntegration > 0.5f && economicData.EconomicWarfareCapability < 5)
+                {
+                    economicData.EconomicWarfareCapability++;
+                }
+            }
+        }
+
+        private void ProcessSpyNetwork(SecretAllianceRecord alliance)
+        {
+            var spyData = EnsureSpyData(alliance);
+
+            // Spy networks develop over time with successful operations
+            if (alliance.SuccessfulOperations > spyData.NetworkTier * 3 && spyData.NetworkTier < Config.MaxSpyNetworkTier)
+            {
+                spyData.NetworkTier++;
+                spyData.InformationQuality += 0.1f;
+                spyData.CounterIntelDefense += 5;
+
+                Debug.Print($"[SecretAlliances] Spy network upgraded to tier {spyData.NetworkTier} for alliance {alliance.UniqueId}");
+            }
+
+            // Natural counter-intelligence decay
+            spyData.CounterIntelDefense = Math.Max(5, spyData.CounterIntelDefense - 1);
+
+            // Information quality degrades without maintenance
+            if (CampaignTime.Now.GetDayOfYear - spyData.LastSuccessfulOperation > 30)
+            {
+                spyData.InformationQuality = Math.Max(0.1f, spyData.InformationQuality - 0.01f);
             }
         }
 
@@ -3132,7 +3476,7 @@ namespace SecretAlliances
             }
 
             // Do not assign Clan.Gold (read-only). If needed, log via your debug system.
-             Debug.Print("[SecretAlliances] Clan->Clan gold transfer action not found in API; skipping transfer.");
+            Debug.Print("[SecretAlliances] Clan->Clan gold transfer action not found in API; skipping transfer.");
         }
 
         private void ExecuteTradeTransfer(SecretAllianceRecord alliance, Clan giver, Clan receiver, int amount)
@@ -3282,5 +3626,336 @@ namespace SecretAlliances
         }
 
         #endregion
+
+        #region Advanced Alliance Management
+
+        // Alliance rank progression system
+        public bool TryUpgradeAlliance(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || alliance.AllianceRank >= Config.MaxAllianceRank) return false;
+
+            // Requirements for rank upgrade
+            if (alliance.Strength >= Config.AdvancedFeatureUnlockThreshold &&
+                alliance.TrustLevel >= Config.AdvancedFeatureUnlockThreshold &&
+                alliance.ReputationScore >= 0.6f)
+            {
+                alliance.AllianceRank++;
+                alliance.ReputationScore += 0.1f;
+
+                // Unlock new capabilities based on rank
+                UnlockRankBasedFeatures(alliance);
+
+                Debug.Print($"[SecretAlliances] Alliance upgraded to rank {alliance.AllianceRank}: {clanA.Name} <-> {clanB.Name}");
+                return true;
+            }
+            return false;
+        }
+
+        private void UnlockRankBasedFeatures(SecretAllianceRecord alliance)
+        {
+            switch (alliance.AllianceRank)
+            {
+                case 1:
+                    // Advanced rank: Enable elite unit exchange and basic diplomatic immunity
+                    if (alliance.AllianceRank >= Config.EliteUnitExchangeMinRank)
+                    {
+                        EnsureMilitaryData(alliance).EliteUnitExchange = true;
+                    }
+                    break;
+                case 2:
+                    // Strategic rank: Enable fortress network and advanced coordination
+                    alliance.DiplomaticImmunity = true;
+                    if (alliance.AllianceRank >= Config.FortressNetworkMinRank)
+                    {
+                        EnsureMilitaryData(alliance).FortressNetworkAccess = 1;
+                    }
+                    EnsureSpyData(alliance).NetworkTier = Math.Min(3, EnsureSpyData(alliance).NetworkTier + 1);
+                    break;
+            }
+        }
+
+        // Alliance contract system
+        public bool CreateContract(Clan clanA, Clan clanB, int contractType, int duration, float value)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || _contracts.Count >= Config.MaxActiveContracts) return false;
+
+            var contract = new AllianceContract
+            {
+                AllianceId = alliance.UniqueId,
+                ContractType = contractType,
+                ExpirationDay = CampaignTime.Now.GetDayOfYear + Math.Max(Config.ContractMinDuration, Math.Min(Config.ContractMaxDuration, duration)),
+                ContractValue = value,
+                AutoRenew = false,
+                ViolationCount = 0,
+                PenaltyClause = value * 0.5f,
+                WitnessClans = new List<MBGUID>()
+            };
+
+            _contracts.Add(contract);
+            Debug.Print($"[SecretAlliances] Contract created: Type {contractType}, Duration {duration} days, Value {value}");
+            return true;
+        }
+
+        // Economic warfare system
+        public void ExecuteEconomicWarfare(SecretAllianceRecord alliance, Clan targetClan)
+        {
+            if (!Config.EnableEconomicWarfare || alliance.EconomicIntegration < 0.3f) return;
+
+            var economicData = EnsureEconomicData(alliance);
+            if (economicData.EconomicWarfareCapability < 3) return;
+
+            // Economic damage calculation
+            float damageMultiplier = alliance.EconomicIntegration * Config.EconomicWarfareEffectiveness;
+
+            // Reduce target clan's income
+            if (targetClan.Gold > 1000)
+            {
+                int goldLoss = (int)(targetClan.Gold * damageMultiplier * 0.05f);
+                goldLoss = Math.Min(goldLoss, 5000); // Cap the damage
+
+                // Apply economic damage through reduced caravan efficiency
+                foreach (var wpc in targetClan.WarPartyComponents)
+                {
+                    var mp = wpc.MobileParty;
+                    if (mp?.IsCaravan == true)
+                    {
+                        mp.Ai.SetDoNotMakeNewDecisions(true);
+                        // Temporary disruption - will reset on next AI update
+                    }
+                }
+
+                Debug.Print($"[SecretAlliances] Economic warfare: {targetClan.Name} disrupted by {alliance.GetInitiatorClan()?.Name} <-> {alliance.GetTargetClan()?.Name}");
+            }
+
+            // Cooldown for economic warfare
+            economicData.EconomicWarfareCapability = Math.Max(0, economicData.EconomicWarfareCapability - 1);
+        }
+
+        // Spy network operations
+        public bool ExecuteSpyOperation(SecretAllianceRecord alliance, Clan targetClan, int operationType)
+        {
+            if (!Config.EnableSpyNetworks) return false;
+
+            var spyData = EnsureSpyData(alliance);
+            if (spyData.NetworkTier < 2) return false;
+
+            float successChance = Config.CounterIntelSuccessRate * (spyData.NetworkTier / (float)Config.MaxSpyNetworkTier);
+
+            // Target's counter-intelligence affects success
+            var targetSpyData = _spyData.FirstOrDefault(s =>
+                s.AllianceId != alliance.UniqueId &&
+                (GetAllianceById(s.AllianceId)?.InitiatorClanId == targetClan.Id ||
+                 GetAllianceById(s.AllianceId)?.TargetClanId == targetClan.Id));
+
+            if (targetSpyData != null)
+            {
+                successChance *= (1f - (targetSpyData.CounterIntelDefense / 100f));
+            }
+
+            if (MBRandom.RandomFloat < successChance)
+            {
+                // Success - execute operation based on type
+                switch (operationType)
+                {
+                    case 1: // Information gathering
+                        CreateSpyIntelligence(alliance, targetClan);
+                        break;
+                    case 2: // Sabotage
+                        CreateSabotageIntelligence(alliance, targetClan);
+                        break;
+                    case 3: // Double agent recruitment
+                        if (spyData.NetworkTier >= Config.DoubleAgentMinTier)
+                        {
+                            spyData.DoubleAgentCapability = true;
+                        }
+                        break;
+                }
+
+                spyData.LastSuccessfulOperation = CampaignTime.Now.GetDayOfYear;
+                spyData.InformationQuality += 0.05f;
+                return true;
+            }
+            else
+            {
+                // Failed operation might be detected
+                if (MBRandom.RandomFloat < Config.SpyNetworkDetectionChance)
+                {
+                    alliance.Secrecy -= 0.1f;
+                    if (targetSpyData != null)
+                    {
+                        targetSpyData.CounterIntelDefense += 5;
+                    }
+                }
+                return false;
+            }
+        }
+
+        // Joint military campaign system
+        public void InitiateJointCampaign(SecretAllianceRecord alliance, Settlement targetSettlement)
+        {
+            if (alliance.AllianceRank < 1 || alliance.MilitaryCoordination < 0.3f) return;
+
+            var initiator = alliance.GetInitiatorClan();
+            var target = alliance.GetTargetClan();
+
+            if (initiator?.WarPartyComponents?.Any() != true || target?.WarPartyComponents?.Any() != true) return;
+
+            // Coordinate military parties
+            var initiatorParty = initiator.WarPartyComponents.FirstOrDefault()?.MobileParty;
+            var targetParty = target.WarPartyComponents.FirstOrDefault()?.MobileParty;
+
+            if (initiatorParty != null && targetParty != null && targetSettlement != null)
+            {
+                // Set both parties to target the same settlement
+                initiatorParty.Ai.SetMoveGoToSettlement(targetSettlement);
+                targetParty.Ai.SetMoveGoToSettlement(targetSettlement);
+
+                var militaryData = EnsureMilitaryData(alliance);
+                militaryData.LastJointBattleDay = CampaignTime.Now.GetDayOfYear;
+                alliance.JointCampaignCount++;
+                alliance.MilitaryCoordination += 0.1f;
+
+                Debug.Print($"[SecretAlliances] Joint campaign initiated against {targetSettlement.Name} by {initiator.Name} and {target.Name}");
+            }
+        }
+
+        // Data management helpers
+        private MilitaryCoordinationData EnsureMilitaryData(SecretAllianceRecord alliance)
+        {
+            var data = _militaryData.FirstOrDefault(m => m.AllianceId == alliance.UniqueId);
+            if (data == null)
+            {
+                data = new MilitaryCoordinationData
+                {
+                    AllianceId = alliance.UniqueId,
+                    CoordinationLevel = 1,
+                    SharedFormations = new List<MBGUID>(),
+                    CombatEfficiencyBonus = 0.05f,
+                    EliteUnitExchange = false,
+                    FortressNetworkAccess = 0
+                };
+                _militaryData.Add(data);
+            }
+            return data;
+        }
+
+        private EconomicNetworkData EnsureEconomicData(SecretAllianceRecord alliance)
+        {
+            var data = _economicData.FirstOrDefault(e => e.AllianceId == alliance.UniqueId);
+            if (data == null)
+            {
+                data = new EconomicNetworkData
+                {
+                    AllianceId = alliance.UniqueId,
+                    TradeVolumeMultiplier = 1.1f,
+                    SharedRoutes = new List<MBGUID>(),
+                    CaravanProtectionLevel = 1,
+                    ResourceSharingRatio = 0.05f,
+                    PriceManipulationAccess = false,
+                    EconomicWarfareCapability = 2
+                };
+                _economicData.Add(data);
+            }
+            return data;
+        }
+
+        private SpyNetworkData EnsureSpyData(SecretAllianceRecord alliance)
+        {
+            var data = _spyData.FirstOrDefault(s => s.AllianceId == alliance.UniqueId);
+            if (data == null)
+            {
+                data = new SpyNetworkData
+                {
+                    AllianceId = alliance.UniqueId,
+                    NetworkTier = 1,
+                    EmbeddedAgents = new List<MBGUID>(),
+                    CounterIntelDefense = 10,
+                    InformationQuality = 0.3f,
+                    DoubleAgentCapability = false
+                };
+                _spyData.Add(data);
+            }
+            return data;
+        }
+
+        private SecretAllianceRecord GetAllianceById(MBGUID allianceId)
+        {
+            return _alliances.FirstOrDefault(a => a.UniqueId == allianceId);
+        }
+
+        // Reputation system
+        public void UpdateReputationScore(SecretAllianceRecord alliance, float delta)
+        {
+            alliance.ReputationScore = MathF.Max(0f, MathF.Min(1f, alliance.ReputationScore + (delta * Config.ReputationGainMultiplier)));
+        }
+
+        // Performance optimization - cache system
+        private void UpdatePerformanceCaches()
+        {
+            int currentDay = CampaignTime.Now.GetDayOfYear;
+            if (currentDay == _lastCacheUpdateDay) return;
+
+            _lastCacheUpdateDay = currentDay;
+            _allianceInfluenceCache.Clear();
+            _diplomaticImmunityCache.Clear();
+
+            // Update influence cache
+            foreach (var alliance in _alliances.Where(a => a.IsActive))
+            {
+                var clanA = alliance.GetInitiatorClan();
+                var clanB = alliance.GetTargetClan();
+
+                if (clanA != null && clanB != null)
+                {
+                    float influence = alliance.Strength * alliance.TrustLevel * alliance.ReputationScore;
+                    _allianceInfluenceCache[clanA.Id] = _allianceInfluenceCache.GetValueOrDefault(clanA.Id, 0f) + influence;
+                    _allianceInfluenceCache[clanB.Id] = _allianceInfluenceCache.GetValueOrDefault(clanB.Id, 0f) + influence;
+
+                    if (alliance.DiplomaticImmunity)
+                    {
+                        _diplomaticImmunityCache[clanA.Id] = _diplomaticImmunityCache.GetValueOrDefault(clanA.Id, 0) + 1;
+                        _diplomaticImmunityCache[clanB.Id] = _diplomaticImmunityCache.GetValueOrDefault(clanB.Id, 0) + 1;
+                    }
+                }
+            }
+        }
+
+        // Public accessor methods for advanced features
+        public float GetAllianceInfluence(Clan clan)
+        {
+            UpdatePerformanceCaches();
+            return _allianceInfluenceCache.GetValueOrDefault(clan.Id, 0f);
+        }
+
+        public bool HasDiplomaticImmunity(Clan clan)
+        {
+            UpdatePerformanceCaches();
+            return _diplomaticImmunityCache.GetValueOrDefault(clan.Id, 0) > 0;
+        }
+
+        public List<AllianceContract> GetActiveContracts()
+        {
+            return _contracts.Where(c => c.IsValid()).ToList();
+        }
+
+        public List<MilitaryCoordinationData> GetMilitaryCoordinationData()
+        {
+            return _militaryData.ToList();
+        }
+
+        public List<EconomicNetworkData> GetEconomicNetworkData()
+        {
+            return _economicData.ToList();
+        }
+
+        public List<SpyNetworkData> GetSpyNetworkData()
+        {
+            return _spyData.ToList();
+        }
+
+        #endregion
     }
 }
+
