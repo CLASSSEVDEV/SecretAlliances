@@ -122,9 +122,9 @@ namespace SecretAlliances
                 "sa_alliance_reject",
                 "sa_alliance_decision",
                 "lord_pretalk",
-                "{=SA_AllianceReject}The risks are too great. I must decline",
+                "{=SA_AllianceReject}The risks are too great. I must decline your proposal at this time.",
                 () => !ShouldAcceptAlliance(),
-                () => ResetConversationState());
+                RejectAllianceWithFeedback);
 
 
             // --- BRIBE BRANCH ---
@@ -204,6 +204,24 @@ namespace SecretAlliances
                 "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
                 () => !HasRumorsToShare(),
                 null);
+
+            // --- ALLIANCE STATUS ---
+            starter.AddPlayerLine(
+                "sa_view_status",
+                "hero_main_options",
+                "sa_status_display",
+                "{=SA_ViewStatus}What is the status of our arrangements?",
+                CanViewAllianceStatus,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_status_display",
+                "sa_status_display",
+                "hero_main_options",
+                "{=SA_StatusDisplay}Let me update you on our current understanding...",
+                () => true,
+                DisplayAllianceStatus);
 
             // --- ALLIANCE MANAGEMENT (for existing allies) ---
             starter.AddPlayerLine(
@@ -398,6 +416,54 @@ namespace SecretAlliances
             return Hero.MainHero?.Gold >= 1000;
         }
 
+        private bool CanViewAllianceStatus()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            // Can view status if we have any alliance or if they might have intelligence
+            var hasAlliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan) != null;
+            var hasIntelligence = _allianceBehavior?.ShouldShowRumorOption(targetHero) ?? false;
+            
+            return hasAlliance || hasIntelligence;
+        }
+
+        private void DisplayAllianceStatus()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance != null)
+            {
+                string statusMessage = $"Alliance with {targetHero.Clan.Name}: " +
+                    $"Strength {alliance.Strength:P0}, Trust {alliance.TrustLevel:P0}, " +
+                    $"Secrecy {alliance.Secrecy:P0}";
+
+                if (alliance.TradePact) statusMessage += " [Trade Pact Active]";
+                if (alliance.MilitaryPact) statusMessage += " [Military Pact Active]";
+                if (alliance.IsOnCooldown()) statusMessage += " [On Cooldown]";
+
+                InformationManager.DisplayMessage(new InformationMessage(statusMessage, Colors.Cyan));
+            }
+            else
+            {
+                // Show general intelligence about secret alliances
+                var rumors = _allianceBehavior?.TryGetRumorsForHero(targetHero, Clan.PlayerClan, 2);
+                if (rumors?.Any() == true)
+                {
+                    foreach (var rumor in rumors)
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage($"Intelligence: {rumor}", Colors.Yellow));
+                    }
+                }
+                else
+                {
+                    InformationManager.DisplayMessage(new InformationMessage("No current intelligence about secret alliances.", Colors.Gray));
+                }
+            }
+        }
+
         private bool CanGatherIntelligence()
         {
             // Can gather intel if this hero might know about secret alliances
@@ -434,7 +500,13 @@ namespace SecretAlliances
 
             // Use the local method instead of the behavior's method
             _currentAllianceEvaluationScore = CalculateAllianceAcceptanceScore(playerClan, targetHero.Clan);
-            _allianceRejected = _currentAllianceEvaluationScore < 60;
+            _allianceRejected = _currentAllianceEvaluationScore < 65; // More consistent threshold
+            
+            // Debug logging to help players understand rejections
+            if (_allianceRejected)
+            {
+                AllianceUIHelper.DebugLog($"Alliance proposal rejected by {targetHero.Clan.Name} (Score: {_currentAllianceEvaluationScore}/100)");
+            }
         }
 
         private void EvaluateBribeOffer()
@@ -468,8 +540,8 @@ namespace SecretAlliances
                 return false;
             }
 
-            // Check stored evaluation score - require ~70% for acceptance
-            return _currentAllianceEvaluationScore >= 70;
+            // Check stored evaluation score - require 65% for acceptance (matches rejection threshold)
+            return _currentAllianceEvaluationScore >= 65;
         }
 
         private bool ShouldAcceptBribe()
@@ -513,6 +585,77 @@ namespace SecretAlliances
 
             // Reset conversation state
             ResetConversationState();
+        }
+
+        private void RejectAllianceWithFeedback()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan != null)
+            {
+                // Provide helpful feedback to the player about why the alliance was rejected
+                string feedbackMessage = GenerateRejectionFeedback(targetHero.Clan, _currentAllianceEvaluationScore);
+                InformationManager.DisplayMessage(new InformationMessage(feedbackMessage, Colors.Red));
+                
+                // Also log for debugging
+                AllianceUIHelper.DebugLog($"Alliance rejected by {targetHero.Clan.Name}: {feedbackMessage}");
+            }
+            
+            ResetConversationState();
+        }
+
+        private string GenerateRejectionFeedback(Clan targetClan, int score)
+        {
+            var playerClan = Clan.PlayerClan;
+            if (targetClan?.Leader == null || playerClan == null) return "Alliance proposal rejected.";
+
+            var feedback = new List<string>();
+            
+            if (score < 25)
+            {
+                feedback.Add($"{targetClan.Name} has very little interest in an alliance");
+            }
+            else if (score < 50)
+            {
+                feedback.Add($"{targetClan.Name} is hesitant about forming an alliance");
+            }
+            else
+            {
+                feedback.Add($"{targetClan.Name} is considering your proposal but has concerns");
+            }
+
+            // Identify specific issues
+            int relation = targetClan.Leader.GetRelation(Hero.MainHero);
+            if (relation < -10)
+            {
+                feedback.Add("your poor relationship with their leader");
+            }
+            else if (relation < 10)
+            {
+                feedback.Add("improve relations with their leader first");
+            }
+
+            if (playerClan.Kingdom != null && targetClan.Kingdom != null && playerClan.Kingdom.IsAtWarWith(targetClan.Kingdom))
+            {
+                feedback.Add("your kingdoms are at war");
+            }
+
+            if (playerClan.Gold < targetClan.Gold * 0.5f)
+            {
+                feedback.Add("your clan's economic weakness");
+            }
+
+            var existingAlliances = _allianceBehavior?.GetAlliances()?.Count(a => 
+                a.IsActive && (a.InitiatorClanId == targetClan.Id || a.TargetClanId == targetClan.Id)) ?? 0;
+            if (existingAlliances >= 2)
+            {
+                feedback.Add("they already have multiple secret alliances");
+            }
+
+            string result = feedback.Count > 1 ? 
+                $"{feedback[0]} due to {string.Join(", ", feedback.Skip(1))}." :
+                $"{feedback[0]}.";
+
+            return result;
         }
 
         private void ResetConversationState()
@@ -659,10 +802,37 @@ namespace SecretAlliances
 
             score += (leadership + charm + roguery) / 10; // Skills help persuasion
 
-            // Random factor for unpredictability
-            score += MBRandom.RandomInt(-15, 15);
+            // Current alliance commitments reduce willingness
+            var existingAlliances = _allianceBehavior?.GetAlliances()?.Count(a => 
+                a.IsActive && (a.InitiatorClanId == targetClan.Id || a.TargetClanId == targetClan.Id)) ?? 0;
+            score -= existingAlliances * 8; // Each existing alliance reduces willingness
 
-            AllianceUIHelper.DebugLog($"Alliance acceptance score for {playerClan.Name} -> {targetClan.Name}: {score}");
+            // Recent betrayals make them more cautious
+            if (targetClan.Leader != null)
+            {
+                int playerRelationWithRuler = targetClan.Kingdom?.Leader?.GetRelation(Hero.MainHero) ?? 0;
+                if (playerRelationWithRuler < -20)
+                {
+                    score -= 20; // Poor relations with their ruler makes them cautious
+                }
+            }
+
+            // Player's past alliance track record (if we have intelligence about them)
+            var playerAlliances = _allianceBehavior?.GetAlliances()?.Where(a => 
+                a.InitiatorClanId == playerClan.Id || a.TargetClanId == playerClan.Id).ToList() ?? new List<SecretAllianceRecord>();
+            
+            int brokenAlliances = playerAlliances.Count(a => a.BetrayalRevealed || !a.IsActive);
+            int successfulAlliances = playerAlliances.Count(a => a.IsActive && a.SuccessfulOperations > 3);
+            
+            score -= brokenAlliances * 12; // Past betrayals hurt reputation
+            score += successfulAlliances * 8; // Successful alliances improve reputation
+
+            // Random factor for unpredictability (reduced to make evaluation more predictable)
+            score += MBRandom.RandomInt(-8, 8);
+
+            AllianceUIHelper.DebugLog($"Alliance acceptance score for {playerClan.Name} -> {targetClan.Name}: {score} " +
+                $"(Base: 30, Relations: {(targetClan.Leader?.GetRelation(Hero.MainHero) ?? 0)/3}, " +
+                $"Existing alliances: -{existingAlliances * 8}, Reputation: {successfulAlliances * 8 - brokenAlliances * 12})");
             return System.Math.Max(0, System.Math.Min(100, score));
         }
 

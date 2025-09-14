@@ -217,9 +217,30 @@ namespace SecretAlliances
             {
                 float formationChance = CalculateFormationChance(clan, candidate);
 
-                if (Config.DebugVerbose && formationChance > 0.05f)
+        // Enhanced debug logging to track AI decision making
+                if (Config.DebugVerbose || formationChance > 0.05f)
                 {
-                    Debug.Print($"[SecretAlliances] Formation chance {clan.Name} -> {candidate.Name}: {formationChance:F3}");
+                    var desperation = CalculateDesperationLevel(clan);
+                    var commonEnemies = HasCommonEnemies(clan, candidate);
+                    var politicalPressure = CalculatePoliticalPressure(clan, candidate);
+                    
+                    Debug.Print($"[SecretAlliances] AI Formation evaluation {clan.Name} -> {candidate.Name}: " +
+                              $"chance={formationChance:F3}, desperation={desperation:F2}, " +
+                              $"commonEnemies={commonEnemies}, political_pressure={politicalPressure:F2}");
+                    
+                    // Also provide context for why evaluation is low if it is
+                    if (formationChance < 0.1f)
+                    {
+                        var reasons = new List<string>();
+                        if (!commonEnemies) reasons.Add("no common enemies");
+                        if (desperation < 0.2f) reasons.Add("not desperate");
+                        if (politicalPressure < 0.3f) reasons.Add("low political pressure");
+                        
+                        if (reasons.Any())
+                        {
+                            Debug.Print($"  Low formation chance due to: {string.Join(", ", reasons)}");
+                        }
+                    }
                 }
 
                 if (MBRandom.RandomFloat < formationChance)
@@ -298,8 +319,30 @@ namespace SecretAlliances
 
             _alliances.Add(alliance);
 
+            // Enhanced debug and player information
+            string reasonsText = "";
+            if (alliance.HasCommonEnemies) reasonsText += "mutual enemies, ";
+            if (CalculateDesperationLevel(initiator) > 0.5f || CalculateDesperationLevel(target) > 0.5f) 
+                reasonsText += "desperation, ";
+            if (alliance.PoliticalPressure > 0.4f) reasonsText += "political pressure, ";
+            reasonsText = reasonsText.TrimEnd(' ', ',');
+            
             Debug.Print($"[SecretAlliances] New alliance formed: {initiator.Name} <-> {target.Name} " +
-                       $"(S:{alliance.Strength:F2}, Sec:{alliance.Secrecy:F2})");
+                       $"(S:{alliance.Strength:F2}, Sec:{alliance.Secrecy:F2}) Reasons: {reasonsText}");
+
+            // Inform player with more context if they're involved or nearby
+            if (initiator == Clan.PlayerClan || target == Clan.PlayerClan)
+            {
+                var otherClan = initiator == Clan.PlayerClan ? target : initiator;
+                InformationManager.DisplayMessage(new InformationMessage(
+                    $"You have formed a secret alliance with {otherClan.Name}!", Colors.Green));
+            }
+            else if (Config.DebugVerbose || MBRandom.RandomFloat < 0.3f) // 30% chance for intel
+            {
+                InformationManager.DisplayMessage(new InformationMessage(
+                    $"Spies report that {initiator.Name} and {target.Name} may be coordinating secretly...", 
+                    Colors.Yellow));
+            }
         }
 
         #endregion
@@ -1829,20 +1872,25 @@ namespace SecretAlliances
 
                         if (EvaluateSideDefection(mapEvent, sideClan, opposingClan, relevantAlliances))
                         {
-                            // Execute defection (leave with rebellion to simulate switching sides)
-                            if (sideClan.Kingdom != null)
+                            // Execute proper side switching - join the opposing clan's kingdom
+                            if (sideClan.Kingdom != null && opposingClan.Kingdom != null && sideClan.Kingdom != opposingClan.Kingdom)
                             {
-                                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(sideClan, false);
+                                // First leave current kingdom peacefully (no rebellion to avoid becoming hostile)
+                                ChangeKingdomAction.ApplyByLeaveKingdom(sideClan, false);
+                                
+                                // Then join the opposing clan's kingdom as defection
+                                ChangeKingdomAction.ApplyByJoinToKingdomByDefection(sideClan, opposingClan.Kingdom, true);
 
-                                // Apply consequences
+                                // Update alliance strength from successful coordination
                                 foreach (var relevantAlliance in relevantAlliances)
                                 {
-                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.3f);
-                                    relevantAlliance.TrustLevel = MathF.Max(0f, relevantAlliance.TrustLevel - 0.2f);
-                                    relevantAlliance.BetrayalRevealed = true;
+                                    relevantAlliance.Strength += 0.1f; // Reward successful battle coordination
+                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.15f); // Some secrecy loss from public defection
+                                    relevantAlliance.SuccessfulOperations++;
+                                    relevantAlliance.MilitaryCoordination += 0.05f;
                                 }
 
-                                Debug.Print($"[Secret Alliances] Pre-battle defection: {sideClan.Name} switched sides due to secret alliance with {opposingClan.Name}");
+                                Debug.Print($"[Secret Alliances] Battle defection: {sideClan.Name} switched from {sideClan.Kingdom?.Name} to {opposingClan.Kingdom.Name} to help allied clan {opposingClan.Name}");
                             }
                             return; // Only one defection per evaluation
                         }
