@@ -93,6 +93,13 @@ namespace SecretAlliances
             {
                 if (clan == null || clan.IsEliminated) return;
 
+                // Ensure Config is accessible - if not, skip processing to avoid crashes
+                if (Config == null)
+                {
+                    Debug.Print("[SecretAlliances] Config is null, skipping daily processing");
+                    return;
+                }
+
                 // Ensure collections are initialized
                 if (_alliances == null) _alliances = new List<SecretAllianceRecord>();
 
@@ -338,8 +345,31 @@ namespace SecretAlliances
                 }
 
                 float finalChance = baseChance * mutualEnemiesFactor * desperationFactor * pressureFactor * militaryFactor;
+                float cappedChance = MathF.Min(finalChance, 0.5f);
 
-                return MathF.Min(finalChance, 0.5f); // Cap at 50%
+                // Add detailed debugging output to match the format seen in logs
+                if (Config.DebugVerbose || cappedChance > 0.05f)
+                {
+                    float initiatorDesperation = (desperationFactor - 1.0f) / 0.5f; // Reverse the calculation to get original desperation
+                    float politicalPressure = (pressureFactor - 1.0f) / 0.3f; // Reverse the calculation to get original pressure
+                    bool commonEnemies = mutualEnemiesFactor > 1.0f;
+                    
+                    Debug.Print($"[SecretAlliances] AI Formation evaluation {initiator.Name} -> {target.Name}: " +
+                              $"chance={cappedChance:F3}, desperation={initiatorDesperation:F2}, " +
+                              $"commonEnemies={commonEnemies}, political_pressure={politicalPressure:F2}");
+                    
+                    if (cappedChance < 0.1f)
+                    {
+                        if (!commonEnemies)
+                            Debug.Print($"  Low formation chance due to: no common enemies");
+                        else if (initiatorDesperation < 0.3f)
+                            Debug.Print($"  Low formation chance due to: low desperation");
+                        else if (politicalPressure < 0.2f)
+                            Debug.Print($"  Low formation chance due to: low political pressure");
+                    }
+                }
+
+                return cappedChance;
             }
             catch (Exception ex)
             {
