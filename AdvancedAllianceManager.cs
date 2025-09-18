@@ -363,21 +363,348 @@ namespace SecretAlliances
             return clan?.Heroes?.Where(h => h.IsAlive && !h.IsChild)?.GetRandomElementInefficiently();
         }
 
-        // Placeholder implementations for complex calculations
-        private Dictionary<string, float> GetClanTroopComposition(Clan clan) => new Dictionary<string, float>();
-        private float CalculateTroopComplementarity(Dictionary<string, float> comp1, Dictionary<string, float> comp2) => 0.5f;
-        private float CalculateMilitaryCoverage(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateTradeRouteSynergy(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateResourceComplementarity(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateMarketAccess(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateGeographicProximity(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateThreatResponse(Clan clan1, Clan clan2) => 0.5f;
-        private float CalculateTraitCompatibility(Hero hero1, Hero hero2) => 0.5f;
-        private float CalculateMarketImpact(SecretAllianceRecord alliance, Clan target) => 0.6f;
-        private void EstablishAlternativeTradeRoutes(SecretAllianceRecord alliance) { }
-        private OperationResult ExecuteDiplomaticInfluenceOperation(SecretAllianceRecord alliance, Clan target) => new OperationResult { Success = true };
-        private OperationResult ExecuteMilitaryCoordinationDrill(SecretAllianceRecord alliance) => new OperationResult { Success = true };
-        private OperationResult ExecuteCulturalExchangeProgram(SecretAllianceRecord alliance) => new OperationResult { Success = true };
+        // Implementation of complex calculations
+        private Dictionary<string, float> GetClanTroopComposition(Clan clan)
+        {
+            var composition = new Dictionary<string, float>
+            {
+                {"infantry", 0.4f},
+                {"archer", 0.3f},
+                {"cavalry", 0.3f}
+            };
+
+            if (clan?.WarPartyComponents != null)
+            {
+                float totalTroops = 0f;
+                float infantryCount = 0f;
+                float archerCount = 0f;
+                float cavalryCount = 0f;
+
+                foreach (var warParty in clan.WarPartyComponents)
+                {
+                    var party = warParty.MobileParty;
+                    if (party?.MemberRoster != null)
+                    {
+                        for (int i = 0; i < party.MemberRoster.Count; i++)
+                        {
+                            var element = party.MemberRoster.GetElementCopyAtIndex(i);
+                            if (element.Character?.IsInfantry == true)
+                                infantryCount += element.Number;
+                            else if (element.Character?.IsArcher == true)
+                                archerCount += element.Number;
+                            else if (element.Character?.IsMounted == true)
+                                cavalryCount += element.Number;
+                            totalTroops += element.Number;
+                        }
+                    }
+                }
+
+                if (totalTroops > 0)
+                {
+                    composition["infantry"] = infantryCount / totalTroops;
+                    composition["archer"] = archerCount / totalTroops;
+                    composition["cavalry"] = cavalryCount / totalTroops;
+                }
+            }
+
+            return composition;
+        }
+
+        private float CalculateTroopComplementarity(Dictionary<string, float> comp1, Dictionary<string, float> comp2)
+        {
+            float complementarity = 0f;
+            
+            // High complementarity when one clan is strong where the other is weak
+            complementarity += Math.Abs(comp1["infantry"] - comp2["infantry"]) * 0.3f;
+            complementarity += Math.Abs(comp1["archer"] - comp2["archer"]) * 0.3f;
+            complementarity += Math.Abs(comp1["cavalry"] - comp2["cavalry"]) * 0.4f;
+            
+            return Math.Min(1f, complementarity);
+        }
+
+        private float CalculateMilitaryCoverage(Clan clan1, Clan clan2)
+        {
+            float coverage = 0.5f; // Base coverage
+            
+            if (clan1?.Settlements != null && clan2?.Settlements != null)
+            {
+                var allSettlements = clan1.Settlements.Concat(clan2.Settlements).ToList();
+                if (allSettlements.Count > 3)
+                {
+                    coverage += 0.2f; // Multiple settlements provide better coverage
+                }
+                
+                // Check if settlements are spread across different regions
+                var cultures = allSettlements.Select(s => s.Culture).Distinct().Count();
+                if (cultures > 1)
+                {
+                    coverage += 0.3f; // Cross-cultural presence
+                }
+            }
+            
+            return Math.Min(1f, coverage);
+        }
+
+        private float CalculateTradeRouteSynergy(Clan clan1, Clan clan2)
+        {
+            float synergy = 0.3f; // Base synergy
+            
+            if (clan1?.Settlements != null && clan2?.Settlements != null)
+            {
+                // Check for complementary settlement types
+                var clan1Towns = clan1.Settlements.Count(s => s.IsTown);
+                var clan1Villages = clan1.Settlements.Count(s => s.IsVillage);
+                var clan2Towns = clan2.Settlements.Count(s => s.IsTown);
+                var clan2Villages = clan2.Settlements.Count(s => s.IsVillage);
+                
+                // Towns and villages complement each other well
+                if (clan1Towns > 0 && clan2Villages > 0 || clan2Towns > 0 && clan1Villages > 0)
+                {
+                    synergy += 0.4f;
+                }
+                
+                // Same culture reduces friction
+                if (clan1.Culture == clan2.Culture)
+                {
+                    synergy += 0.3f;
+                }
+            }
+            
+            return Math.Min(1f, synergy);
+        }
+
+        private float CalculateResourceComplementarity(Clan clan1, Clan clan2)
+        {
+            float complementarity = 0.4f; // Base complementarity
+            
+            // Economic status differences can be complementary
+            if (clan1?.Gold > 0 && clan2?.Gold > 0)
+            {
+                float wealthRatio = (float)Math.Min(clan1.Gold, clan2.Gold) / Math.Max(clan1.Gold, clan2.Gold);
+                if (wealthRatio < 0.5f)
+                {
+                    complementarity += 0.3f; // Wealthy and poor clans can complement each other
+                }
+            }
+            
+            // Different settlement types provide resource diversity
+            var clan1HasTowns = clan1?.Settlements?.Any(s => s.IsTown) == true;
+            var clan1HasVillages = clan1?.Settlements?.Any(s => s.IsVillage) == true;
+            var clan2HasTowns = clan2?.Settlements?.Any(s => s.IsTown) == true;
+            var clan2HasVillages = clan2?.Settlements?.Any(s => s.IsVillage) == true;
+            
+            if ((clan1HasTowns && clan2HasVillages) || (clan2HasTowns && clan1HasVillages))
+            {
+                complementarity += 0.3f;
+            }
+            
+            return Math.Min(1f, complementarity);
+        }
+
+        private float CalculateMarketAccess(Clan clan1, Clan clan2)
+        {
+            float marketAccess = 0.3f; // Base access
+            
+            if (clan1?.Settlements != null && clan2?.Settlements != null)
+            {
+                int totalTowns = clan1.Settlements.Count(s => s.IsTown) + clan2.Settlements.Count(s => s.IsTown);
+                marketAccess += totalTowns * 0.15f; // Each town improves market access
+                
+                // Cross-kingdom alliances provide broader market access
+                if (clan1.Kingdom != clan2.Kingdom)
+                {
+                    marketAccess += 0.4f;
+                }
+            }
+            
+            return Math.Min(1f, marketAccess);
+        }
+
+        private float CalculateGeographicProximity(Clan clan1, Clan clan2)
+        {
+            float proximity = 0.5f; // Default moderate proximity
+            
+            if (clan1?.Settlements?.Any() == true && clan2?.Settlements?.Any() == true)
+            {
+                var settlement1 = clan1.Settlements.FirstOrDefault();
+                var settlement2 = clan2.Settlements.FirstOrDefault();
+                
+                if (settlement1 != null && settlement2 != null)
+                {
+                    float distance = settlement1.Position2D.Distance(settlement2.Position2D);
+                    
+                    // Closer settlements have higher proximity scores
+                    if (distance < 50f) proximity = 0.9f;
+                    else if (distance < 100f) proximity = 0.7f;
+                    else if (distance < 200f) proximity = 0.5f;
+                    else proximity = 0.3f;
+                }
+            }
+            
+            return proximity;
+        }
+
+        private float CalculateThreatResponse(Clan clan1, Clan clan2)
+        {
+            float threatResponse = 0.2f; // Base threat response
+            
+            // Check for common enemies
+            if (clan1?.Kingdom != null && clan2?.Kingdom != null)
+            {
+                var clan1Enemies = clan1.Kingdom.IsAtWarWith.ToList();
+                var clan2Enemies = clan2.Kingdom.IsAtWarWith.ToList();
+                
+                int commonEnemies = clan1Enemies.Intersect(clan2Enemies).Count();
+                threatResponse += commonEnemies * 0.3f; // Each common enemy increases threat response
+                
+                // Being at war with each other reduces threat response
+                if (clan1.Kingdom.IsAtWarWith.Contains(clan2.Kingdom))
+                {
+                    threatResponse -= 0.6f;
+                }
+            }
+            
+            return Math.Max(0f, Math.Min(1f, threatResponse));
+        }
+
+        private float CalculateTraitCompatibility(Hero hero1, Hero hero2)
+        {
+            if (hero1 == null || hero2 == null) return 0.5f;
+            
+            float compatibility = 0.5f; // Base compatibility
+            
+            var traits1 = hero1.GetHeroTraits();
+            var traits2 = hero2.GetHeroTraits();
+            
+            // Similar honor levels work well together
+            int honorDiff = Math.Abs(traits1.Honor - traits2.Honor);
+            compatibility += (3 - honorDiff) * 0.1f;
+            
+            // Calculating heroes work well with anyone
+            if (traits1.Calculating > 0 || traits2.Calculating > 0)
+            {
+                compatibility += 0.2f;
+            }
+            
+            // Generous heroes are easier to work with
+            compatibility += (traits1.Generosity + traits2.Generosity) * 0.05f;
+            
+            return Math.Max(0f, Math.Min(1f, compatibility));
+        }
+
+        private float CalculateMarketImpact(SecretAllianceRecord alliance, Clan target)
+        {
+            float impact = 0.3f; // Base impact
+            
+            if (alliance.EconomicIntegration > 0.5f)
+            {
+                impact += alliance.EconomicIntegration * 0.4f;
+            }
+            
+            // Stronger alliances have more market influence
+            impact += alliance.Strength * 0.3f;
+            
+            return Math.Min(1f, impact);
+        }
+
+        private void EstablishAlternativeTradeRoutes(SecretAllianceRecord alliance)
+        {
+            var economicData = _behavior.GetEconomicNetworkData().FirstOrDefault(e => e.AllianceId == alliance.UniqueId);
+            if (economicData != null)
+            {
+                economicData.TradeVolumeMultiplier += 0.1f;
+                Debug.Print($"[SecretAlliances] Alternative trade routes established for alliance {alliance.UniqueId}");
+            }
+        }
+
+        private OperationResult ExecuteDiplomaticInfluenceOperation(SecretAllianceRecord alliance, Clan target)
+        {
+            var result = new OperationResult { OperationType = AdvancedOperationType.DiplomaticInfluenceOperation };
+            
+            if (alliance.ReputationScore > 0.6f && alliance.AllianceRank >= 1)
+            {
+                // Successful diplomatic influence
+                var initiator = alliance.GetInitiatorClan();
+                var partner = alliance.GetTargetClan();
+                
+                if (initiator?.Leader != null && partner?.Leader != null && target?.Leader != null)
+                {
+                    // Improve relations between alliance members and target
+                    ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, target.Leader, 5);
+                    ChangeRelationAction.ApplyRelationChangeBetweenHeroes(partner.Leader, target.Leader, 5);
+                    
+                    result.Success = true;
+                    result.Message = "Diplomatic influence successfully established";
+                    result.ImpactScore = 0.7f;
+                }
+            }
+            else
+            {
+                result.Success = false;
+                result.Message = "Insufficient diplomatic standing for influence operation";
+                result.ImpactScore = 0.1f;
+            }
+            
+            return result;
+        }
+
+        private OperationResult ExecuteMilitaryCoordinationDrill(SecretAllianceRecord alliance)
+        {
+            var result = new OperationResult { OperationType = AdvancedOperationType.MilitaryCoordinationDrill };
+            
+            if (alliance.MilitaryPact && alliance.MilitaryCoordination > 0.3f)
+            {
+                // Improve military coordination
+                alliance.MilitaryCoordination += 0.05f;
+                alliance.MilitaryCoordination = Math.Min(1f, alliance.MilitaryCoordination);
+                
+                result.Success = true;
+                result.Message = "Military coordination improved through joint exercises";
+                result.ImpactScore = 0.6f;
+            }
+            else
+            {
+                result.Success = false;
+                result.Message = "Military pact required for coordination drills";
+                result.ImpactScore = 0.0f;
+            }
+            
+            return result;
+        }
+
+        private OperationResult ExecuteCulturalExchangeProgram(SecretAllianceRecord alliance)
+        {
+            var result = new OperationResult { OperationType = AdvancedOperationType.CulturalExchangeProgram };
+            
+            var initiator = alliance.GetInitiatorClan();
+            var partner = alliance.GetTargetClan();
+            
+            if (initiator != null && partner != null)
+            {
+                // Improve trust and reduce cultural barriers
+                alliance.TrustLevel += 0.03f;
+                alliance.TrustLevel = Math.Min(1f, alliance.TrustLevel);
+                
+                if (initiator.Culture != partner.Culture)
+                {
+                    // Cross-cultural exchange provides additional benefits
+                    alliance.ReputationScore += 0.02f;
+                    alliance.ReputationScore = Math.Min(1f, alliance.ReputationScore);
+                }
+                
+                result.Success = true;
+                result.Message = "Cultural exchange program successfully completed";
+                result.ImpactScore = 0.5f;
+            }
+            else
+            {
+                result.Success = false;
+                result.Message = "Invalid alliance for cultural exchange";
+                result.ImpactScore = 0.0f;
+            }
+            
+            return result;
+        }
 
         #endregion
     }

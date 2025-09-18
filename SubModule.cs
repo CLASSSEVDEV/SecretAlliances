@@ -14,12 +14,12 @@ namespace SecretAlliances
     public class SubModule : MBSubModuleBase
     {
         private SecretAllianceBehavior _allianceBehavior;
+        private AllianceUIIntegration _uiIntegration;
 
         private int _currentAllianceEvaluationScore = 0;
         private int _currentBribeReceptivity = 0;
         private int _currentBribeAmount = 0;
         private bool _lastPactResult = false;
-
 
         // Add a flag to track rejection
         private bool _allianceRejected = false;
@@ -34,17 +34,18 @@ namespace SecretAlliances
                 _allianceBehavior = new SecretAllianceBehavior();
                 campaignStarter.AddBehavior(_allianceBehavior);
 
+                // Initialize UI integration
+                _uiIntegration = new AllianceUIIntegration(_allianceBehavior);
+
                 // Register console commands for debugging
                 ConsoleCommands.RegisterCommands();
-
-
 
                 // Register dialog lines for secret alliance system
                 AddDialogs(campaignStarter);
 
                 AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
 
-                InformationManager.DisplayMessage(new InformationMessage("Secret Alliances loaded!", Colors.Cyan));
+                InformationManager.DisplayMessage(new InformationMessage("Secret Alliances loaded with UI integration!", Colors.Cyan));
 
                 // Debug: Dump all alliances on startup for testing
                 // This will show any existing alliances when loading a save
@@ -434,34 +435,72 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan == null) return;
 
-            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
-            if (alliance != null)
+            try
             {
-                string statusMessage = $"Alliance with {targetHero.Clan.Name}: " +
-                    $"Strength {alliance.Strength:P0}, Trust {alliance.TrustLevel:P0}, " +
-                    $"Secrecy {alliance.Secrecy:P0}";
-
-                if (alliance.TradePact) statusMessage += " [Trade Pact Active]";
-                if (alliance.MilitaryPact) statusMessage += " [Military Pact Active]";
-                if (alliance.IsOnCooldown()) statusMessage += " [On Cooldown]";
-
-                InformationManager.DisplayMessage(new InformationMessage(statusMessage, Colors.Cyan));
-            }
-            else
-            {
-                // Show general intelligence about secret alliances
-                var rumors = _allianceBehavior?.TryGetRumorsForHero(targetHero, Clan.PlayerClan, 2);
-                if (rumors?.Any() == true)
+                var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+                if (alliance != null)
                 {
-                    foreach (var rumor in rumors)
+                    // Show detailed alliance status using UI integration
+                    var statusText = _uiIntegration?.GetClanAllianceStatusText(Clan.PlayerClan);
+                    if (!string.IsNullOrEmpty(statusText))
                     {
-                        InformationManager.DisplayMessage(new InformationMessage($"Intelligence: {rumor}", Colors.Yellow));
+                        InformationManager.DisplayMessage(new InformationMessage(statusText, Colors.Green));
+                    }
+
+                    // Show specific alliance details
+                    string statusMessage = $"Alliance with {targetHero.Clan.Name}: " +
+                        $"Strength {alliance.Strength:P0}, Trust {alliance.TrustLevel:P0}, " +
+                        $"Secrecy {alliance.Secrecy:P0}";
+
+                    if (alliance.TradePact) statusMessage += " [Trade Pact Active]";
+                    if (alliance.MilitaryPact) statusMessage += " [Military Pact Active]";
+                    if (alliance.MarriageAlliance) statusMessage += " [Marriage Alliance]";
+                    if (alliance.DiplomaticImmunity) statusMessage += " [Diplomatic Immunity]";
+                    if (alliance.IsOnCooldown()) statusMessage += " [On Cooldown]";
+
+                    InformationManager.DisplayMessage(new InformationMessage(statusMessage, Colors.Cyan));
+
+                    // Show influence status
+                    var influenceStatus = _uiIntegration?.GetAllianceInfluenceStatus(Clan.PlayerClan);
+                    if (!string.IsNullOrEmpty(influenceStatus))
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage(influenceStatus, Colors.Blue));
                     }
                 }
                 else
                 {
-                    InformationManager.DisplayMessage(new InformationMessage("No current intelligence about secret alliances.", Colors.Gray));
+                    // Show general intelligence about secret alliances
+                    var rumors = _allianceBehavior?.TryGetRumorsForHero(targetHero, Clan.PlayerClan, 2);
+                    if (rumors?.Any() == true)
+                    {
+                        foreach (var rumor in rumors)
+                        {
+                            InformationManager.DisplayMessage(new InformationMessage($"Intelligence: {rumor}", Colors.Yellow));
+                        }
+                    }
+                    else
+                    {
+                        // Show alliance recommendations if no direct alliance exists
+                        var recommendations = _uiIntegration?.GetAllianceRecommendations();
+                        if (recommendations?.Any() == true)
+                        {
+                            InformationManager.DisplayMessage(new InformationMessage("Alliance Opportunities:", Colors.Green));
+                            foreach (var rec in recommendations.Take(1)) // Show only top recommendation
+                            {
+                                InformationManager.DisplayMessage(new InformationMessage(rec, Colors.Gray));
+                            }
+                        }
+                        else
+                        {
+                            InformationManager.DisplayMessage(new InformationMessage("No current intelligence about secret alliances.", Colors.Gray));
+                        }
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error displaying alliance status: {ex.Message}");
+                InformationManager.DisplayMessage(new InformationMessage("Unable to retrieve alliance status.", Colors.Red));
             }
         }
 

@@ -4107,6 +4107,28 @@ namespace SecretAlliances
             return _spyData.ToList();
         }
 
+        public SecretAllianceRecord GetAllianceById(MBGUID allianceId)
+        {
+            return _alliances.FirstOrDefault(a => a.UniqueId == allianceId);
+        }
+
+        public List<AllianceIntelligence> GetIntelligenceForAlliance(MBGUID allianceId)
+        {
+            return _intelligence.Where(i => i.AllianceId == allianceId).ToList();
+        }
+
+        public bool CanUpgradeAlliance(Clan clanA, Clan clanB)
+        {
+            var alliance = FindAlliance(clanA, clanB);
+            if (alliance == null || !alliance.IsActive) return false;
+
+            // Check if upgrade is possible
+            return alliance.AllianceRank < Config.MaxAllianceRank &&
+                   alliance.Strength >= Config.AdvancedFeatureUnlockThreshold &&
+                   alliance.TrustLevel >= 0.6f &&
+                   alliance.SuccessfulOperations >= (alliance.AllianceRank + 1) * 3;
+        }
+
         #endregion
     }
 }
