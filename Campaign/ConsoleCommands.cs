@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Linq;
+using SecretAlliances.Core;
+using SecretAlliances.UI;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 
-namespace SecretAlliances
+namespace SecretAlliances.Campaign
 {
     public static class ConsoleCommands
     {

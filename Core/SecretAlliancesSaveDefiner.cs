@@ -1,13 +1,15 @@
-﻿using SecretAlliances;
+﻿using SecretAlliances.Core;
 using System.Collections.Generic;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.ObjectSystem;
 using TaleWorlds.SaveSystem;
 
-public class SecretAlliancesSaveDefiner : SaveableTypeDefiner
+namespace SecretAlliances.Core
 {
-    public SecretAlliancesSaveDefiner() : base(2340000) { }
+    public class SecretAlliancesSaveDefiner : SaveableTypeDefiner
+    {
+        public SecretAlliancesSaveDefiner() : base(2340000) { }
 
     protected override void DefineClassTypes()
     {

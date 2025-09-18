@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SecretAlliances.Infrastructure
+namespace SecretAlliances.Core
 {
     internal static class DictionaryExtensions
     {
