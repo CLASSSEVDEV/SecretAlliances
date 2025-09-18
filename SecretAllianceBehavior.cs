@@ -4117,6 +4117,43 @@ namespace SecretAlliances
             return _intelligence.Where(i => i.AllianceId == allianceId).ToList();
         }
 
+        public List<AllianceIntelligence> GetIntelligence()
+        {
+            return _intelligence.ToList();
+        }
+
+        public bool CreateTestAlliance(Clan clanA, Clan clanB)
+        {
+            if (clanA == null || clanB == null || clanA == clanB) return false;
+            if (FindAlliance(clanA, clanB) != null) return false;
+
+            var alliance = new SecretAllianceRecord
+            {
+                UniqueId = MBGUID.Generate(),
+                InitiatorClanId = clanA.Id,
+                TargetClanId = clanB.Id,
+                CreatedGameDay = CampaignTime.Now.GetDayOfYear,
+                Strength = 0.4f,
+                Secrecy = 0.7f,
+                TrustLevel = 0.5f,
+                IsActive = true,
+                EconomicIncentive = 0.3f,
+                PoliticalPressure = 0.2f,
+                TradePact = false,
+                MilitaryPact = false,
+                GroupId = 0,
+                LastInteractionDay = CampaignTime.Now.GetDayOfYear,
+                CooldownDays = 0,
+                SuccessfulOperations = 0,
+                AllianceRank = 0,
+                ReputationScore = 0.5f
+            };
+
+            _alliances.Add(alliance);
+            Debug.Print($"[SecretAlliances] Test alliance created: {clanA.Name} <-> {clanB.Name}");
+            return true;
+        }
+
         public bool CanUpgradeAlliance(Clan clanA, Clan clanB)
         {
             var alliance = FindAlliance(clanA, clanB);
