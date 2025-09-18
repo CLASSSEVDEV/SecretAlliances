@@ -5,7 +5,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.ObjectSystem;
 using TaleWorlds.SaveSystem;
 
-namespace SecretAlliances
+namespace SecretAlliances.Core
 {
     [Serializable] // give it a unique id for your mod
     public class SecretAllianceRecord

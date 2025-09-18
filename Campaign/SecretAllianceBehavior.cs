@@ -12,9 +12,9 @@ using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 using TaleWorlds.SaveSystem;
-using SecretAlliances.Infrastructure;
+using SecretAlliances.Core;
 
-namespace SecretAlliances
+namespace SecretAlliances.Campaign
 {
     public class SecretAllianceBehavior : CampaignBehaviorBase
     {

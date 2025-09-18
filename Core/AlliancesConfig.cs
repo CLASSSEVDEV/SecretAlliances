@@ -3,7 +3,7 @@ using System.IO;
 using Newtonsoft.Json;
 using TaleWorlds.Library;
 
-namespace SecretAlliances
+namespace SecretAlliances.Core
 {
     public class AllianceConfig
     {
