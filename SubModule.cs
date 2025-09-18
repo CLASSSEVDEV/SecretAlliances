@@ -17,6 +17,7 @@ namespace SecretAlliances
     public class SubModule : MBSubModuleBase
     {
         private SecretAllianceBehavior _allianceBehavior;
+        private AllianceScreenManager _screenManager;
 
         private int _currentAllianceEvaluationScore = 0;
         private int _currentBribeReceptivity = 0;
@@ -36,6 +37,10 @@ namespace SecretAlliances
                 // Add the campaign behavior that manages the alliances
                 _allianceBehavior = new SecretAllianceBehavior();
                 campaignStarter.AddBehavior(_allianceBehavior);
+
+                // Initialize UI integration
+                _screenManager = new AllianceScreenManager(_allianceBehavior);
+                _screenManager.InitializeScreenIntegration();
 
                 // Register console commands for debugging
                 ConsoleCommands.RegisterCommands();
@@ -226,6 +231,24 @@ namespace SecretAlliances
                 "{=SA_StatusDisplay}Let me update you on our current understanding...",
                 () => true,
                 DisplayAllianceStatus);
+
+            // --- DETAILED ALLIANCE INFO (using new UI system) ---
+            starter.AddPlayerLine(
+                "sa_show_alliance_details",
+                "hero_main_options", 
+                "sa_alliance_details_response",
+                "{=SA_ShowDetails}Tell me about your clan's alliances and relationships...",
+                () => _screenManager != null && Hero.OneToOneConversationHero?.Clan != null,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_alliance_details_response",
+                "sa_alliance_details_response",
+                "hero_main_options",
+                "{=SA_DetailsResponse}I can share what I know of our diplomatic situation...",
+                () => true,
+                ShowDetailedAllianceInfo);
 
             // --- ALLIANCE MANAGEMENT (for existing allies) ---
             starter.AddPlayerLine(
@@ -465,6 +488,21 @@ namespace SecretAlliances
                 {
                     InformationManager.DisplayMessage(new InformationMessage("No current intelligence about secret alliances.", Colors.Gray));
                 }
+            }
+        }
+
+        private void ShowDetailedAllianceInfo()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null || _screenManager == null) return;
+
+            // Show detailed alliance information for the target clan
+            _screenManager.ShowAllianceDetails(targetHero.Clan);
+
+            // If talking to a ruler, also show kingdom overview
+            if (targetHero.Clan.Kingdom != null && targetHero.Clan.Kingdom.Leader == targetHero)
+            {
+                _screenManager.ShowKingdomAllianceOverview(targetHero.Clan.Kingdom);
             }
         }
 
