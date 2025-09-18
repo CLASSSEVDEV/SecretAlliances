@@ -8,8 +8,8 @@ namespace SecretAlliances
     public class AllianceConfig
     {
         // Configuration properties with default values
-        public float FormationBaseChance { get; set; } = 0.05f;
-        public int MaxDailyFormations { get; set; } = 2;
+        public float FormationBaseChance { get; set; } = 0.3f;
+        public int MaxDailyFormations { get; set; } = 10;
         public int OperationIntervalDays { get; set; } = 15;
         public float LeakBaseChance { get; set; } = 0.008f;
         public float TradeFlowMultiplier { get; set; } = 1.5f;

@@ -84,73 +84,91 @@ namespace SecretAlliances
             dataStore.SyncData("SecretAlliances_MilitaryData", ref _militaryData);
             dataStore.SyncData("SecretAlliances_EconomicData", ref _economicData);
             dataStore.SyncData("SecretAlliances_SpyData", ref _spyData);
+            dataStore.SyncData("SecretAlliances_HasRunFirstDayDiagnostics", ref _hasRunFirstDayDiagnostics);
         }
 
         private void OnDailyTickClan(Clan clan)
         {
-            if (clan == null || clan.IsEliminated) return;
-
-            // First-day diagnostics (run once)
-            if (!_hasRunFirstDayDiagnostics && clan == Clan.All.FirstOrDefault())
+            try
             {
-                RunInitializationDiagnostics();
-                _hasRunFirstDayDiagnostics = true;
+                if (clan == null || clan.IsEliminated) return;
+
+                // Ensure Config is accessible - if not, skip processing to avoid crashes
+                if (Config == null)
+                {
+                    Debug.Print("[SecretAlliances] Config is null, skipping daily processing");
+                    return;
+                }
+
+                // Ensure collections are initialized
+                if (_alliances == null) _alliances = new List<SecretAllianceRecord>();
+
+                // First-day diagnostics (run once)
+                if (!_hasRunFirstDayDiagnostics && clan == Clan.All.FirstOrDefault())
+                {
+                    RunInitializationDiagnostics();
+                    _hasRunFirstDayDiagnostics = true;
+                }
+
+                // Process all alliances involving this clan
+                var relevantAlliances = _alliances.Where(a =>
+                    a != null && a.IsActive &&
+                    (a.InitiatorClanId == clan.Id || a.TargetClanId == clan.Id)).ToList();
+
+                foreach (var alliance in relevantAlliances)
+                {
+                    EvaluateAlliance(alliance);
+
+                    // Process pact effects
+                    ProcessTradePactEffects(alliance);
+                    ProcessMilitaryPactEffects(alliance);
+
+                    // Process aging and decay
+                    ProcessAllianceAging(alliance);
+
+                    // Age cooldown per alliance
+                    if (alliance.CooldownDays > 0)
+                    {
+                        alliance.CooldownDays--;
+                    }
+
+                    // Age betrayal cooldown
+                    if (alliance.BetrayalCooldownDays > 0)
+                    {
+                        alliance.BetrayalCooldownDays--;
+                    }
+                }
+
+                // Check for new alliance opportunities with enhanced AI
+                EvaluateAllianceFormationAI(clan);
+
+                // Process operations framework
+                ProcessOperationsDaily(clan);
+
+                // Process intelligence aging daily
+                ProcessIntelligenceAging();
+
+                // Global processes (once per day, triggered by first clan)
+                if (clan == Clan.All.FirstOrDefault())
+                {
+                    CalculateCoalitionCohesion();
+                    ProcessForcedRevealMechanics();
+                    ProcessBetrayalEvaluations();
+                    CleanupOldData();
+
+                    // Advanced feature processing
+                    if (Config.EnableAdvancedFeatures)
+                    {
+                        ProcessAdvancedFeatures();
+                        ProcessContractManagement();
+                        ProcessReputationDecay();
+                        ProcessAllianceRankProgression();
+                    }
+                }
             }
-
-            // Process all alliances involving this clan
-            var relevantAlliances = _alliances.Where(a =>
-                a.IsActive &&
-                (a.InitiatorClanId == clan.Id || a.TargetClanId == clan.Id)).ToList();
-
-            foreach (var alliance in relevantAlliances)
+            catch (Exception ex)
             {
-                EvaluateAlliance(alliance);
-
-                // Process pact effects
-                ProcessTradePactEffects(alliance);
-                ProcessMilitaryPactEffects(alliance);
-
-                // Process aging and decay
-                ProcessAllianceAging(alliance);
-
-                // Age cooldown per alliance
-                if (alliance.CooldownDays > 0)
-                {
-                    alliance.CooldownDays--;
-                }
-
-                // Age betrayal cooldown
-                if (alliance.BetrayalCooldownDays > 0)
-                {
-                    alliance.BetrayalCooldownDays--;
-                }
-            }
-
-            // Check for new alliance opportunities with enhanced AI
-            EvaluateAllianceFormationAI(clan);
-
-            // Process operations framework
-            ProcessOperationsDaily(clan);
-
-            // Process intelligence aging daily
-            ProcessIntelligenceAging();
-
-            // Global processes (once per day, triggered by first clan)
-            if (clan == Clan.All.FirstOrDefault())
-            {
-                CalculateCoalitionCohesion();
-                ProcessForcedRevealMechanics();
-                ProcessBetrayalEvaluations();
-                CleanupOldData();
-
-                // Advanced feature processing
-                if (Config.EnableAdvancedFeatures)
-                {
-                    ProcessAdvancedFeatures();
-                    ProcessContractManagement();
-                    ProcessReputationDecay();
-                    ProcessAllianceRankProgression();
-                }
+                Debug.Print($"[SecretAlliances] Error in OnDailyTickClan for clan {clan?.Name.ToString() ?? "Unknown"}: {ex.Message}");
             }
         }
 
@@ -158,37 +176,68 @@ namespace SecretAlliances
 
         private void RunInitializationDiagnostics()
         {
-            int activeAlliances = _alliances.Count(a => a.IsActive);
-            float avgStrength = activeAlliances > 0 ? _alliances.Where(a => a.IsActive).Average(a => a.Strength) : 0f;
-            float avgSecrecy = activeAlliances > 0 ? _alliances.Where(a => a.IsActive).Average(a => a.Secrecy) : 0f;
-            int numGroups = _alliances.Where(a => a.IsActive && a.GroupId > 0).Select(a => a.GroupId).Distinct().Count();
+            try
+            {
+                // Ensure collections are initialized
+                if (_alliances == null) _alliances = new List<SecretAllianceRecord>();
+                if (_intelligence == null) _intelligence = new List<AllianceIntelligence>();
 
-            Debug.Print($"[SecretAlliances] Initialization Diagnostics:");
-            Debug.Print($"  Active Alliances: {activeAlliances}");
-            Debug.Print($"  Average Strength: {avgStrength:F3}");
-            Debug.Print($"  Average Secrecy: {avgSecrecy:F3}");
-            Debug.Print($"  Coalition Groups: {numGroups}");
-            Debug.Print($"  Intelligence Records: {_intelligence.Count}");
+                int activeAlliances = _alliances.Count(a => a != null && a.IsActive);
+                float avgStrength = activeAlliances > 0 ? _alliances.Where(a => a != null && a.IsActive).Average(a => a.Strength) : 0f;
+                float avgSecrecy = activeAlliances > 0 ? _alliances.Where(a => a != null && a.IsActive).Average(a => a.Secrecy) : 0f;
+                int numGroups = _alliances.Where(a => a != null && a.IsActive && a.GroupId > 0).Select(a => a.GroupId).Distinct().Count();
 
-            // Repair invalid UniqueId entries
-            RepairUniqueIds();
+                Debug.Print($"[SecretAlliances] Initialization Diagnostics:");
+                Debug.Print($"  Active Alliances: {activeAlliances}");
+                Debug.Print($"  Average Strength: {avgStrength:F3}");
+                Debug.Print($"  Average Secrecy: {avgSecrecy:F3}");
+                Debug.Print($"  Coalition Groups: {numGroups}");
+                Debug.Print($"  Intelligence Records: {_intelligence.Count}");
+
+                // Repair invalid UniqueId entries
+                RepairUniqueIds();
+            }
+            catch (Exception ex)
+            {
+                Debug.Print($"[SecretAlliances] Error in RunInitializationDiagnostics: {ex.Message}");
+            }
         }
 
         private void RepairUniqueIds()
         {
-            int repaired = 0;
-            foreach (var alliance in _alliances)
+            try
             {
-                if (alliance.UniqueId == default(MBGUID))
+                if (_alliances == null) return;
+
+                int repaired = 0;
+                foreach (var alliance in _alliances)
                 {
-                    alliance.UniqueId = alliance.InitiatorClanId; // Use InitiatorClanId as fallback
-                    repaired++;
+                    if (alliance == null) continue;
+
+                    if (alliance.UniqueId == default(MBGUID))
+                    {
+                        // Ensure InitiatorClanId is not null before using it
+                        if (alliance.InitiatorClanId != default(MBGUID))
+                        {
+                            alliance.UniqueId = alliance.InitiatorClanId; // Use InitiatorClanId as fallback
+                            repaired++;
+                        }
+                        else if (alliance.TargetClanId != default(MBGUID))
+                        {
+                            alliance.UniqueId = alliance.TargetClanId; // Fallback to TargetClanId
+                            repaired++;
+                        }
+                    }
+                }
+
+                if (repaired > 0)
+                {
+                    Debug.Print($"[SecretAlliances] Repaired {repaired} invalid UniqueId entries");
                 }
             }
-
-            if (repaired > 0)
+            catch (Exception ex)
             {
-                Debug.Print($"[SecretAlliances] Repaired {repaired} invalid UniqueId entries");
+                Debug.Print($"[SecretAlliances] Error in RepairUniqueIds: {ex.Message}");
             }
         }
 
@@ -198,60 +247,136 @@ namespace SecretAlliances
 
         private void EvaluateAllianceFormationAI(Clan clan)
         {
-            if (MBRandom.RandomFloat > Config.FormationBaseChance) return;
-
-            // Check daily formation limit
-            int formationsToday = _alliances.Count(a => a.CreatedGameDay == CampaignTime.Now.GetDayOfYear);
-            if (formationsToday >= Config.MaxDailyFormations) return;
-
-            // Find potential alliance targets
-            var candidates = Clan.All.Where(c =>
-                c != clan &&
-                !c.IsEliminated &&
-                !c.IsMinorFaction &&
-                !HasExistingAlliance(clan, c)).ToList();
-
-            if (!candidates.Any()) return;
-
-            foreach (var candidate in candidates.Take(3)) // Limit evaluation to prevent performance issues
+            try
             {
-                float formationChance = CalculateFormationChance(clan, candidate);
+                if (clan == null || Config == null) return;
+                if (MBRandom.RandomFloat > Config.FormationBaseChance) return;
 
-                if (Config.DebugVerbose && formationChance > 0.05f)
-                {
-                    Debug.Print($"[SecretAlliances] Formation chance {clan.Name} -> {candidate.Name}: {formationChance:F3}");
-                }
+                // Check daily formation limit
+                int formationsToday = _alliances.Count(a => a != null && a.CreatedGameDay == CampaignTime.Now.GetDayOfYear);
+                if (formationsToday >= Config.MaxDailyFormations) return;
 
-                if (MBRandom.RandomFloat < formationChance)
+                // Find potential alliance targets
+                var candidates = Clan.All.Where(c =>
+                    c != null &&
+                    c != clan &&
+                    !c.IsEliminated &&
+                    !c.IsMinorFaction &&
+                    !HasExistingAlliance(clan, c)).ToList();
+
+                if (!candidates.Any()) return;
+
+                foreach (var candidate in candidates.Take(3)) // Limit evaluation to prevent performance issues
                 {
-                    CreateNewAlliance(clan, candidate);
-                    break; // Only one formation per clan per day
+                    if (candidate == null) continue;
+
+                    float formationChance = CalculateFormationChance(clan, candidate);
+
+                    if (Config.DebugVerbose && formationChance > 0.05f)
+                    {
+                        Debug.Print($"[SecretAlliances] Formation chance {clan.Name} -> {candidate.Name}: {formationChance:F3}");
+                    }
+
+                    if (MBRandom.RandomFloat < formationChance)
+                    {
+                        CreateNewAlliance(clan, candidate);
+                        break; // Only one formation per clan per day
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.Print($"[SecretAlliances] Error in EvaluateAllianceFormationAI for clan {clan?.Name.ToString() ?? "Unknown"}: {ex.Message}");
             }
         }
 
         private float CalculateFormationChance(Clan initiator, Clan target)
         {
-            float baseChance = Config.FormationBaseChance;
+            try
+            {
+                if (initiator == null || target == null || Config == null) return 0f;
 
-            // Mutual enemies factor
-            float mutualEnemiesFactor = HasCommonEnemies(initiator, target) ? 1.5f : 1.0f;
+                float baseChance = Config.FormationBaseChance;
 
-            // Economic disparity factor (desperation)
-            float initiatorDesperation = CalculateDesperationLevel(initiator);
-            float targetDesperation = CalculateDesperationLevel(target);
-            float desperationFactor = 1.0f + (initiatorDesperation + targetDesperation) * 0.5f;
+                // Mutual enemies factor
+                float mutualEnemiesFactor = 1.0f;
+                try
+                {
+                    mutualEnemiesFactor = HasCommonEnemies(initiator, target) ? 1.5f : 1.0f;
+                }
+                catch (Exception ex)
+                {
+                    Debug.Print($"[SecretAlliances] Error in HasCommonEnemies: {ex.Message}");
+                }
 
-            // Political pressure factor
-            float politicalPressure = CalculatePoliticalPressure(initiator, target);
-            float pressureFactor = 1.0f + politicalPressure * 0.3f;
+                // Economic disparity factor (desperation)
+                float desperationFactor = 1.0f;
+                try
+                {
+                    float initiatorDesperation = CalculateDesperationLevel(initiator);
+                    float targetDesperation = CalculateDesperationLevel(target);
+                    desperationFactor = 1.0f + (initiatorDesperation + targetDesperation) * 0.5f;
+                }
+                catch (Exception ex)
+                {
+                    Debug.Print($"[SecretAlliances] Error in CalculateDesperationLevel: {ex.Message}");
+                }
 
-            // Military power relationship
-            float militaryFactor = CalculateMilitaryPowerFactor(initiator, target);
+                // Political pressure factor
+                float pressureFactor = 1.0f;
+                try
+                {
+                    float politicalPressure = CalculatePoliticalPressure(initiator, target);
+                    pressureFactor = 1.0f + politicalPressure * 0.3f;
+                }
+                catch (Exception ex)
+                {
+                    Debug.Print($"[SecretAlliances] Error in CalculatePoliticalPressure: {ex.Message}");
+                }
 
-            float finalChance = baseChance * mutualEnemiesFactor * desperationFactor * pressureFactor * militaryFactor;
+                // Military power relationship
+                float militaryFactor = 1.0f;
+                try
+                {
+                    militaryFactor = CalculateMilitaryPowerFactor(initiator, target);
+                }
+                catch (Exception ex)
+                {
+                    Debug.Print($"[SecretAlliances] Error in CalculateMilitaryPowerFactor: {ex.Message}");
+                }
 
-            return MathF.Min(finalChance, 0.5f); // Cap at 50%
+                float finalChance = baseChance * mutualEnemiesFactor * desperationFactor * pressureFactor * militaryFactor;
+                float cappedChance = MathF.Min(finalChance, 0.5f);
+
+                // Add detailed debugging output to match the format seen in logs
+                if (Config.DebugVerbose || cappedChance > 0.05f)
+                {
+                    float initiatorDesperation = (desperationFactor - 1.0f) / 0.5f; // Reverse the calculation to get original desperation
+                    float politicalPressure = (pressureFactor - 1.0f) / 0.3f; // Reverse the calculation to get original pressure
+                    bool commonEnemies = mutualEnemiesFactor > 1.0f;
+
+                    Debug.Print($"[SecretAlliances] AI Formation evaluation {initiator.Name} -> {target.Name}: " +
+                              $"chance={cappedChance:F3}, desperation={initiatorDesperation:F2}, " +
+                              $"commonEnemies={commonEnemies}, political_pressure={politicalPressure:F2}");
+
+                    if (cappedChance < 0.1f)
+                    {
+                        if (!commonEnemies)
+                            Debug.Print($"  Low formation chance due to: no common enemies");
+                        else if (initiatorDesperation < 0.3f)
+                            Debug.Print($"  Low formation chance due to: low desperation");
+                        else if (politicalPressure < 0.2f)
+                            Debug.Print($"  Low formation chance due to: low political pressure");
+                    }
+                }
+
+                return cappedChance;
+            }
+            catch (Exception ex)
+            {
+                Debug.Print($"[SecretAlliances] Error in CalculateFormationChance: {ex.Message}");
+                return 0f;
+            }
         }
 
 
@@ -298,8 +423,30 @@ namespace SecretAlliances
 
             _alliances.Add(alliance);
 
+            // Enhanced debug and player information
+            string reasonsText = "";
+            if (alliance.HasCommonEnemies) reasonsText += "mutual enemies, ";
+            if (CalculateDesperationLevel(initiator) > 0.5f || CalculateDesperationLevel(target) > 0.5f)
+                reasonsText += "desperation, ";
+            if (alliance.PoliticalPressure > 0.4f) reasonsText += "political pressure, ";
+            reasonsText = reasonsText.TrimEnd(' ', ',');
+
             Debug.Print($"[SecretAlliances] New alliance formed: {initiator.Name} <-> {target.Name} " +
-                       $"(S:{alliance.Strength:F2}, Sec:{alliance.Secrecy:F2})");
+                       $"(S:{alliance.Strength:F2}, Sec:{alliance.Secrecy:F2}) Reasons: {reasonsText}");
+
+            // Inform player with more context if they're involved or nearby
+            if (initiator == Clan.PlayerClan || target == Clan.PlayerClan)
+            {
+                var otherClan = initiator == Clan.PlayerClan ? target : initiator;
+                InformationManager.DisplayMessage(new InformationMessage(
+                    $"You have formed a secret alliance with {otherClan.Name}!", Colors.Green));
+            }
+            else if (Config.DebugVerbose || MBRandom.RandomFloat < 0.3f) // 30% chance for intel
+            {
+                InformationManager.DisplayMessage(new InformationMessage(
+                    $"Spies report that {initiator.Name} and {target.Name} may be coordinating secretly...",
+                    Colors.Yellow));
+            }
         }
 
         #endregion
@@ -1829,20 +1976,25 @@ namespace SecretAlliances
 
                         if (EvaluateSideDefection(mapEvent, sideClan, opposingClan, relevantAlliances))
                         {
-                            // Execute defection (leave with rebellion to simulate switching sides)
-                            if (sideClan.Kingdom != null)
+                            // Execute proper side switching - join the opposing clan's kingdom
+                            if (sideClan.Kingdom != null && opposingClan.Kingdom != null && sideClan.Kingdom != opposingClan.Kingdom)
                             {
-                                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(sideClan, false);
+                                // First leave current kingdom peacefully (no rebellion to avoid becoming hostile)
+                                ChangeKingdomAction.ApplyByLeaveKingdom(sideClan, false);
 
-                                // Apply consequences
+                                // Then join the opposing clan's kingdom as defection
+                                ChangeKingdomAction.ApplyByJoinToKingdomByDefection(sideClan, opposingClan.Kingdom, true);
+
+                                // Update alliance strength from successful coordination
                                 foreach (var relevantAlliance in relevantAlliances)
                                 {
-                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.3f);
-                                    relevantAlliance.TrustLevel = MathF.Max(0f, relevantAlliance.TrustLevel - 0.2f);
-                                    relevantAlliance.BetrayalRevealed = true;
+                                    relevantAlliance.Strength += 0.1f; // Reward successful battle coordination
+                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.15f); // Some secrecy loss from public defection
+                                    relevantAlliance.SuccessfulOperations++;
+                                    relevantAlliance.MilitaryCoordination += 0.05f;
                                 }
 
-                                Debug.Print($"[Secret Alliances] Pre-battle defection: {sideClan.Name} switched sides due to secret alliance with {opposingClan.Name}");
+                                Debug.Print($"[Secret Alliances] Battle defection: {sideClan.Name} switched from {sideClan.Kingdom?.Name} to {opposingClan.Kingdom.Name} to help allied clan {opposingClan.Name}");
                             }
                             return; // Only one defection per evaluation
                         }
@@ -2206,7 +2358,7 @@ namespace SecretAlliances
             }
         }
 
-        private void OnSettlementOwnerChanged(Settlement settlement,bool _,Hero newOwner,Hero oldOwner,Hero capturerHero,ChangeOwnerOfSettlementAction.ChangeOwnerOfSettlementDetail detail)
+        private void OnSettlementOwnerChanged(Settlement settlement, bool _, Hero newOwner, Hero oldOwner, Hero capturerHero, ChangeOwnerOfSettlementAction.ChangeOwnerOfSettlementDetail detail)
         {
             if (newOwner?.Clan == null) return;
 
@@ -2311,8 +2463,8 @@ namespace SecretAlliances
 
         private void OnVillageRaided(Village village)
         {
-            
-            
+
+
         }
 
 
@@ -3958,4 +4110,3 @@ namespace SecretAlliances
         #endregion
     }
 }
-
