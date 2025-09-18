@@ -42,6 +42,9 @@ namespace SecretAlliances.Campaign
         private Dictionary<MBGUID, int> _diplomaticImmunityCache = new Dictionary<MBGUID, int>();
         private int _lastCacheUpdateDay = -1;
 
+        // Enhanced AI system for rational decision-making
+        private AllianceAI _aiSystem;
+
         // Configuration constants - replaced by dynamic config
         private AllianceConfig Config
         {
@@ -61,6 +64,9 @@ namespace SecretAlliances.Campaign
 
         public override void RegisterEvents()
         {
+            // Initialize enhanced AI system
+            _aiSystem = new AllianceAI(this);
+
             // Daily clan processing
             CampaignEvents.DailyTickClanEvent.AddNonSerializedListener(this, OnDailyTickClan);
 
@@ -1632,13 +1638,22 @@ namespace SecretAlliances.Campaign
 
             foreach (var target in potentialTargets.Take(3)) // Only consider top 3 candidates
             {
-                float allianceDesirability = CalculateAllianceDesirability(clan, target);
-
-                if (allianceDesirability > 0.6f && MBRandom.RandomFloat < allianceDesirability * 0.1f)
+                // Use enhanced AI system for rational decision-making
+                if (_aiSystem != null && _aiSystem.ShouldCreateAlliance(clan, target))
                 {
-                    // AI-initiated alliance
-                    CreateAllianceAI(clan, target, allianceDesirability);
-                    Debug.Print($"[Secret Alliances] AI-initiated alliance: {clan.Name} -> {target.Name} (desirability: {allianceDesirability:F2})");
+                    // AI-initiated alliance using utility-based decision making
+                    CreateAllianceAI(clan, target, 0.7f); // Pass reasonable desirability
+                    Debug.Print($"[Secret Alliances] Enhanced AI-initiated alliance: {clan.Name} -> {target.Name}");
+                }
+                else
+                {
+                    // Fallback to old system if AI system not available
+                    float allianceDesirability = CalculateAllianceDesirability(clan, target);
+                    if (allianceDesirability > 0.6f && MBRandom.RandomFloat < allianceDesirability * 0.1f)
+                    {
+                        CreateAllianceAI(clan, target, allianceDesirability);
+                        Debug.Print($"[Secret Alliances] Fallback AI-initiated alliance: {clan.Name} -> {target.Name} (desirability: {allianceDesirability:F2})");
+                    }
                 }
             }
         }
@@ -3032,6 +3047,24 @@ namespace SecretAlliances.Campaign
 
         private void EvaluateStrategicBetrayal(SecretAllianceRecord alliance)
         {
+            var initiatorClan = alliance.GetInitiatorClan();
+            var targetClan = alliance.GetTargetClan();
+            
+            if (initiatorClan == null || targetClan == null) return;
+
+            // Use enhanced AI system for betrayal decisions
+            bool shouldBetrayInitiator = _aiSystem?.ShouldBetrayAlliance(initiatorClan, alliance) == true;
+            bool shouldBetrayTarget = _aiSystem?.ShouldBetrayAlliance(targetClan, alliance) == true;
+
+            if (shouldBetrayInitiator || shouldBetrayTarget)
+            {
+                var betrayingClan = shouldBetrayInitiator ? initiatorClan : targetClan;
+                Debug.Print($"[SecretAlliances] Enhanced AI betrayal: {betrayingClan.Name} betraying alliance");
+                ExecuteBetrayal(alliance);
+                return;
+            }
+
+            // Fallback to original system if AI system not available or doesn't trigger
             float baseChance = Config.BetrayalBaseChance;
 
             // Calculate betrayal factors
@@ -3052,7 +3085,7 @@ namespace SecretAlliances.Campaign
                                $"\"strength\":{strengthFactor:F3},\"trust\":{trustFactor:F3}," +
                                $"\"pressure\":{pressureFactor:F3},\"desperation\":{desperationFactor:F3}," +
                                $"\"escalation\":{alliance.BetrayalEscalationCounter:F3},\"final\":{betrayalChance:F3}}}";
-                Debug.Print($"[SecretAlliances] Betrayal evaluation: {factorJson}");
+                Debug.Print($"[SecretAlliances] Fallback betrayal evaluation: {factorJson}");
             }
 
             // Escalating near-miss system
