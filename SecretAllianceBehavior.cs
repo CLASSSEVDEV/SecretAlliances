@@ -43,7 +43,21 @@ namespace SecretAlliances
         private int _lastCacheUpdateDay = -1;
 
         // Configuration constants - replaced by dynamic config
-        private AllianceConfig Config => AllianceConfig.Instance;
+        private AllianceConfig Config
+        {
+            get
+            {
+                try
+                {
+                    return AllianceConfig.Instance;
+                }
+                catch (Exception ex)
+                {
+                    Debug.Print($"[SecretAlliances] Config access failed: {ex.Message}. Using fallback defaults.");
+                    return new AllianceConfig(); // Return a default instance instead of null
+                }
+            }
+        }
 
         public override void RegisterEvents()
         {
@@ -93,12 +107,7 @@ namespace SecretAlliances
             {
                 if (clan == null || clan.IsEliminated) return;
 
-                // Ensure Config is accessible - if not, skip processing to avoid crashes
-                if (Config == null)
-                {
-                    Debug.Print("[SecretAlliances] Config is null, skipping daily processing");
-                    return;
-                }
+                // Ensure Config is accessible - now handled by Config property safety wrapper
 
                 // Ensure collections are initialized
                 if (_alliances == null) _alliances = new List<SecretAllianceRecord>();
@@ -1953,6 +1962,10 @@ namespace SecretAlliances
             {
                 var sideClan = party?.LeaderHero?.Clan;
                 if (sideClan == null || sideClan.Leader == null) continue;
+                
+                // CRITICAL FIX: Never force the player clan to switch kingdoms during battle
+                // Player should always have manual control over their kingdom allegiance
+                if (sideClan == Clan.PlayerClan) continue;
 
                 foreach (var opposingParty in opposingParties)
                 {
