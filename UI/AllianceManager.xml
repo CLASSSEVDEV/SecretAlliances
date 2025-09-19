@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Prefab>
+  <!-- Alliance Manager UI Template for Gauntlet Integration -->
+  <!-- This would be integrated into Clan/Kingdom screens as a tab -->
+  
+  <Constants>
+    <Constant Name="alliance_item_height" BrushLayer="alliance_item" SpriteSize="40" />
+    <Constant Name="request_item_height" BrushLayer="request_item" SpriteSize="35" />
+  </Constants>
+
+  <Variables>
+    <Variable Name="AllianceManagerVM" />
+  </Variables>
+
+  <Window DoNotAcceptEvents="true" DoNotPassEventsToChildren="false">
+    <Widget DoNotAcceptEvents="false" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent">
+      
+      <!-- Header Section -->
+      <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                 LayoutImp.LayoutMethod="VerticalBottomToTop" MarginTop="20">
+        
+        <!-- Title and Status -->
+        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren">
+          <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                     LayoutImp.LayoutMethod="HorizontalLeftToRight">
+            
+            <!-- Title -->
+            <RichTextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                           Text="@ClanName Secret Alliances" Brush="Clan.Title.Text" />
+            
+            <!-- Status -->
+            <RichTextWidget WidthSizePolicy="Fixed" SuggestedWidth="200" HeightSizePolicy="CoverChildren" 
+                           Text="@StatusMessage" Brush="Clan.Status.Text" HorizontalAlignment="Right" />
+          </ListPanel>
+        </Widget>
+
+        <!-- Statistics Bar -->
+        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="10">
+          
+          <RichTextWidget Text="Alliances: @TotalAlliances" Brush="Clan.Stat.Text" 
+                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+          
+          <RichTextWidget Text="Requests: @TotalRequests" Brush="Clan.Stat.Text" 
+                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="20" />
+          
+          <RichTextWidget Text="Exposure: @OverallExposureScore%" Brush="Clan.Stat.Text" 
+                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="20" />
+          
+        </ListPanel>
+
+        <!-- Action Buttons -->
+        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="15">
+          
+          <ButtonWidget DoNotAcceptEvents="false" Command.Click="ExecuteCreateAlliance" 
+                       IsEnabled="@CanCreateAlliance" WidthSizePolicy="Fixed" SuggestedWidth="150" 
+                       HeightSizePolicy="Fixed" SuggestedHeight="30" Brush="Clan.Button">
+            <TextWidget Text="Create Alliance" Brush="Clan.Button.Text" />
+          </ButtonWidget>
+          
+          <ButtonWidget DoNotAcceptEvents="false" Command.Click="ExecuteRefresh" 
+                       WidthSizePolicy="Fixed" SuggestedWidth="100" HeightSizePolicy="Fixed" 
+                       SuggestedHeight="30" Brush="Clan.Button" MarginLeft="10">
+            <TextWidget Text="Refresh" Brush="Clan.Button.Text" />
+          </ButtonWidget>
+          
+        </ListPanel>
+      </ListPanel>
+
+      <!-- Main Content Area -->
+      <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                 LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="120">
+
+        <!-- Left Panel - My Alliances -->
+        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+               WidthSizePolicy="Fixed" SuggestedWidth="45%">
+          
+          <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                     LayoutImp.LayoutMethod="VerticalBottomToTop">
+            
+            <!-- My Alliances Header -->
+            <RichTextWidget Text="My Alliances" Brush="Clan.Section.Title" 
+                           WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+            
+            <!-- My Alliances List -->
+            <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                            MarginTop="10" AutoHideScrollBarHandle="true">
+              
+              <ListPanel DataSource="{MyAlliances}" WidthSizePolicy="StretchToParent" 
+                        HeightSizePolicy="CoverChildren" LayoutImp.LayoutMethod="VerticalBottomToTop">
+                
+                <!-- Alliance Item Template -->
+                <AllianceItemWidget WidthSizePolicy="StretchToParent" 
+                                   HeightSizePolicy="Fixed" SuggestedHeight="@alliance_item_height">
+                  
+                  <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                            LayoutImp.LayoutMethod="VerticalBottomToTop" Brush="Clan.List.Item">
+                    
+                    <!-- Alliance Name and Status -->
+                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                              LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                      
+                      <RichTextWidget Text="@Name" Brush="Clan.List.Item.Title" 
+                                     WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+                      
+                      <RichTextWidget Text="@StatusDescription" Brush="Clan.List.Item.Status" 
+                                     WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                     HorizontalAlignment="Right" />
+                    </ListPanel>
+
+                    <!-- Alliance Stats -->
+                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                              LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                      
+                      <RichTextWidget Text="Members: @MemberCount" Brush="Clan.List.Item.Detail" 
+                                     WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+                      
+                      <RichTextWidget Text="Trust: @TrustLevel%" Brush="Clan.List.Item.Detail" 
+                                     WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                     MarginLeft="15" />
+                      
+                      <RichTextWidget Text="Secrecy: @SecrecyLevel%" Brush="Clan.List.Item.Detail" 
+                                     WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                     MarginLeft="15" />
+                    </ListPanel>
+
+                    <!-- Action Buttons -->
+                    <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                              LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                      
+                      <ButtonWidget Command.Click="ExecuteViewDetails" 
+                                   WidthSizePolicy="Fixed" SuggestedWidth="80" HeightSizePolicy="Fixed" 
+                                   SuggestedHeight="25" Brush="Clan.Small.Button">
+                        <TextWidget Text="Details" Brush="Clan.Small.Button.Text" />
+                      </ButtonWidget>
+                      
+                      <ButtonWidget Command.Click="ExecuteLeaveAlliance" IsVisible="@IsNotLeader"
+                                   WidthSizePolicy="Fixed" SuggestedWidth="80" HeightSizePolicy="Fixed" 
+                                   SuggestedHeight="25" Brush="Clan.Small.Button" MarginLeft="5">
+                        <TextWidget Text="Leave" Brush="Clan.Small.Button.Text" />
+                      </ButtonWidget>
+                      
+                    </ListPanel>
+                  </ListPanel>
+                </AllianceItemWidget>
+              </ListPanel>
+            </ScrollablePanel>
+          </ListPanel>
+        </Widget>
+
+        <!-- Right Panel - Requests -->
+        <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+               WidthSizePolicy="Fixed" SuggestedWidth="45%" MarginLeft="20">
+          
+          <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                     LayoutImp.LayoutMethod="VerticalBottomToTop">
+            
+            <!-- Pending Requests Section -->
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="45%">
+              <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                        LayoutImp.LayoutMethod="VerticalBottomToTop">
+                
+                <RichTextWidget Text="Pending Requests" Brush="Clan.Section.Title" 
+                               WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+                
+                <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                                 MarginTop="10" AutoHideScrollBarHandle="true">
+                  
+                  <ListPanel DataSource="{PendingRequests}" WidthSizePolicy="StretchToParent" 
+                            HeightSizePolicy="CoverChildren" LayoutImp.LayoutMethod="VerticalBottomToTop">
+                    
+                    <!-- Request Item Template -->
+                    <RequestItemWidget WidthSizePolicy="StretchToParent" 
+                                      HeightSizePolicy="Fixed" SuggestedHeight="@request_item_height">
+                      
+                      <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                                LayoutImp.LayoutMethod="VerticalBottomToTop" Brush="Clan.List.Item">
+                        
+                        <!-- Request Header -->
+                        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                                  LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                          
+                          <RichTextWidget Text="@TypeDescription" Brush="Clan.List.Item.Title" 
+                                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+                          
+                          <RichTextWidget Text="@RequesterName" Brush="Clan.List.Item.Detail" 
+                                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                         HorizontalAlignment="Right" />
+                        </ListPanel>
+
+                        <!-- Request Details -->
+                        <RichTextWidget Text="@Description" Brush="Clan.List.Item.Detail" 
+                                       WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+
+                        <!-- Request Stats and Actions -->
+                        <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" 
+                                  LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                          
+                          <RichTextWidget Text="Reward: @Reward" Brush="Clan.List.Item.Detail" 
+                                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+                          
+                          <RichTextWidget Text="Risk: @RiskLevel%" Brush="Clan.List.Item.Detail" 
+                                         WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                         MarginLeft="15" />
+                          
+                          <!-- Action Buttons -->
+                          <ButtonWidget Command.Click="ExecuteAccept" IsEnabled="@CanAccept"
+                                       WidthSizePolicy="Fixed" SuggestedWidth="70" HeightSizePolicy="Fixed" 
+                                       SuggestedHeight="20" Brush="Clan.Small.Button" MarginLeft="auto">
+                            <TextWidget Text="Accept" Brush="Clan.Small.Button.Text" />
+                          </ButtonWidget>
+                          
+                          <ButtonWidget Command.Click="ExecuteDecline" IsEnabled="@CanDecline"
+                                       WidthSizePolicy="Fixed" SuggestedWidth="70" HeightSizePolicy="Fixed" 
+                                       SuggestedHeight="20" Brush="Clan.Small.Button" MarginLeft="5">
+                            <TextWidget Text="Decline" Brush="Clan.Small.Button.Text" />
+                          </ButtonWidget>
+                        </ListPanel>
+                      </ListPanel>
+                    </RequestItemWidget>
+                  </ListPanel>
+                </ScrollablePanel>
+              </ListPanel>
+            </Widget>
+
+            <!-- Sent Requests Section -->
+            <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="45%" 
+                   MarginTop="20">
+              
+              <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                        LayoutImp.LayoutMethod="VerticalBottomToTop">
+                
+                <RichTextWidget Text="Sent Requests" Brush="Clan.Section.Title" 
+                               WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+                
+                <ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                                 MarginTop="10" AutoHideScrollBarHandle="true">
+                  
+                  <ListPanel DataSource="{SentRequests}" WidthSizePolicy="StretchToParent" 
+                            HeightSizePolicy="CoverChildren" LayoutImp.LayoutMethod="VerticalBottomToTop">
+                    
+                    <!-- Sent Request Item Template (simpler, no action buttons) -->
+                    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" 
+                           SuggestedHeight="30" Brush="Clan.List.Item">
+                      
+                      <ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" 
+                                LayoutImp.LayoutMethod="HorizontalLeftToRight">
+                        
+                        <RichTextWidget Text="@TypeDescription" Brush="Clan.List.Item.Title" 
+                                       WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+                        
+                        <RichTextWidget Text="@TargetName" Brush="Clan.List.Item.Detail" 
+                                       WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                       MarginLeft="15" />
+                        
+                        <RichTextWidget Text="@StatusDescription" Brush="Clan.List.Item.Status" 
+                                       WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" 
+                                       HorizontalAlignment="Right" />
+                      </ListPanel>
+                    </Widget>
+                  </ListPanel>
+                </ScrollablePanel>
+              </ListPanel>
+            </Widget>
+          </ListPanel>
+        </Widget>
+      </ListPanel>
+    </Widget>
+  </Window>
+</Prefab>
