@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+    <Name value="Secret Alliances"/>
+    <Id value="SecretAlliances"/>
+    <Version value="v2.0.0"/>
+    <SingleplayerModule value="true"/>
+    <MultiplayerModule value="false"/>
+    <DependedModules>
+        <DependedModule Id="SandBoxCore" DependedModuleType="Required" Version="v1.2.9"/>
+        <DependedModule Id="Sandbox" DependedModuleType="Required" Version="v1.2.9"/>
+        <DependedModule Id="StoryMode" DependedModuleType="Required" Version="v1.2.9"/>
+    </DependedModules>
+    <SubModules>
+        <SubModule>
+            <Name value="SecretAlliances"/>
+            <DLLName value="SecretAlliances.dll"/>
+            <SubModuleClassType value="SecretAlliances.SubModule"/>
+            <Tags>
+                <Tag key="DedicatedServerType" value="none"/>
+                <Tag key="IsNoRenderModeElement" value="false"/>
+            </Tags>
+        </SubModule>
+    </SubModules>
+    <Xmls/>
+</Module>
