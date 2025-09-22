@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
@@ -91,7 +92,7 @@ namespace SecretAlliances
                 SecretAllianceClickableCondition,
                 null);
 
-            // Cooldown version of main offer
+            // Cooldown version of main offer (higher priority when conditions match)
             starter.AddPlayerLine(
                 "sa_main_offer_cooldown",
                 "hero_main_options",
@@ -99,7 +100,7 @@ namespace SecretAlliances
                 "{=SA_PlayerOfferCooldown}I have a discreet proposal that could benefit both our clans...",
                 () => CanOfferSecretAlliance() && HasRecentRejection(),
                 null,
-                99,
+                101, // Higher priority than main offer
                 SecretAllianceClickableCondition,
                 null);
 
@@ -466,7 +467,7 @@ namespace SecretAlliances
                 null,
                 100);
 
-            // Cooldown version of deepen pact
+            // Cooldown version of deepen pact (higher priority when conditions match)
             starter.AddPlayerLine(
                 "sa_deepen_pact_cooldown",
                 "hero_main_options",
@@ -474,7 +475,7 @@ namespace SecretAlliances
                 "{=SA_DeepenPactCooldown}Perhaps we should deepen our arrangement...",
                 () => CanDeepenPact() && IsAllianceOnCooldown(),
                 null,
-                99);
+                101); // Higher priority than main deepen pact
 
             starter.AddDialogLine(
                 "sa_cooldown_response_line",
@@ -642,6 +643,29 @@ namespace SecretAlliances
         }
 
 
+        // Add conversation tracking to prevent duplicates
+        private HashSet<string> _activeDialogueIds = new HashSet<string>();
+
+        private bool IsDialogueActive(string dialogueId)
+        {
+            return _activeDialogueIds.Contains(dialogueId);
+        }
+
+        private void ActivateDialogue(string dialogueId)
+        {
+            _activeDialogueIds.Add(dialogueId);
+        }
+
+        private void DeactivateDialogue(string dialogueId)
+        {
+            _activeDialogueIds.Remove(dialogueId);
+        }
+
+        private void ClearActiveDialogues()
+        {
+            _activeDialogueIds.Clear();
+        }
+
         // Conversation condition methods
         private bool CanOfferSecretAlliance()
         {
@@ -731,6 +755,20 @@ namespace SecretAlliances
 
         private bool SecretAllianceClickableCondition(out TextObject explanation)
         {
+            var targetHero = Hero.OneToOneConversationHero;
+            
+            if (targetHero?.Clan == null)
+            {
+                explanation = new TextObject("{=SA_ClickConditionInvalid}Cannot propose alliance");
+                return false;
+            }
+
+            if (HasRecentRejection())
+            {
+                explanation = new TextObject("{=SA_ClickConditionCooldown}We discussed this recently");
+                return true;
+            }
+
             explanation = new TextObject("{=SA_ClickCondition}Propose secret coordination");
             return true;
         }
