@@ -81,6 +81,18 @@ namespace SecretAlliances
                 SecretAllianceClickableCondition,
                 null);
 
+            // --- EXISTING ALLIANCE MANAGEMENT ---
+            starter.AddPlayerLine(
+                "sa_existing_alliance",
+                "hero_main_options", 
+                "sa_alliance_management",
+                "{=SA_ExistingAlliance}Let's discuss our current arrangement.",
+                HasExistingAlliance,
+                null,
+                100,
+                ExistingAllianceClickableCondition,
+                null);
+
             starter.AddDialogLine(
                 "sa_lord_considers",
                 "sa_response_consider",   // comes from sa_main_offer
@@ -91,10 +103,43 @@ namespace SecretAlliances
 
             // --- COOLDOWN RESPONSE ---
             starter.AddDialogLine(
-                "sa_cooldown_response",
+                "sa_lord_cooldown_response",
                 "sa_cooldown_response",   // comes from sa_main_offer_cooldown
                 "hero_main_options",
                 "{=SA_CooldownResponse}We have discussed such matters recently. Perhaps we should wait before speaking of this again.",
+                () => true,
+                null);
+
+            // --- EXISTING ALLIANCE MANAGEMENT RESPONSE ---
+            starter.AddDialogLine(
+                "sa_alliance_management_response",
+                "sa_alliance_management",   // comes from sa_existing_alliance
+                "sa_alliance_options",
+                "{=SA_AllianceManagement}Indeed, our coordination has been... beneficial. What aspect shall we discuss?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_alliance_status",
+                "sa_alliance_options",
+                "hero_main_options",
+                "{=SA_AllianceStatus}How do you view our current arrangement?",
+                () => true,
+                DisplayAllianceStatus);
+
+            starter.AddPlayerLine(
+                "sa_alliance_improve",
+                "sa_alliance_options",
+                "sa_pact_options",
+                "{=SA_AllianceImprove}Perhaps we can expand our cooperation.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_alliance_options_back",
+                "sa_alliance_options",
+                "hero_main_options",
+                "{=SA_AllianceBack}Our current arrangement works well.",
                 () => true,
                 null);
 
@@ -481,16 +526,18 @@ namespace SecretAlliances
             var playerClan = Clan.PlayerClan;
             if (playerClan == null) return false;
 
-            // Can't offer to eliminated clans or those already allied
+            // Can't offer to eliminated clans
             if (targetHero.Clan.IsEliminated) return false;
-            if (_allianceBehavior?.FindAlliance(playerClan, targetHero.Clan) != null) return false;
 
             // Basic requirements
             if (targetHero.Clan.Leader != targetHero) return false; // Only to clan leaders
             if (playerClan.Kingdom == null) return false; // Player must be in a kingdom
 
-            // Check if on cooldown - if so, this method returns false and the cooldown version is shown
+            // Can't offer if already allied (unless on cooldown - then show different message)
             var alliance = _allianceBehavior?.FindAlliance(playerClan, targetHero.Clan);
+            if (alliance != null && !alliance.IsOnCooldown()) return false;
+
+            // Check if on cooldown - if so, this method returns false and the cooldown version is shown
             if (alliance != null && alliance.IsOnCooldown()) return false;
 
             return true;
@@ -509,12 +556,56 @@ namespace SecretAlliances
             if (targetHero.Clan.Leader != targetHero) return false;
             if (playerClan.Kingdom == null) return false;
 
-            // Show cooldown message if there's an alliance on cooldown or recent interaction
+            // Show cooldown message if there's an alliance on cooldown
             var alliance = _allianceBehavior?.FindAlliance(playerClan, targetHero.Clan);
-            if (alliance != null && alliance.IsOnCooldown()) return true;
+            if (alliance != null && alliance.IsOnCooldown()) 
+            {
+                AllianceUIHelper.DebugLog($"Alliance with {targetHero.Clan.Name} is on cooldown - showing cooldown message");
+                return true;
+            }
 
-            // Or check if there was a recent failed interaction (this could be expanded based on behavior data)
+            // Also show cooldown if there was a recent failed attempt that should have a cooldown
+            // This could be expanded based on behavior data tracking recent interactions
             return false;
+        }
+
+        private bool HasExistingAlliance()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null || targetHero.Clan == Clan.PlayerClan) return false;
+
+            var playerClan = Clan.PlayerClan;
+            if (playerClan == null) return false;
+
+            // Show this option if there's an active alliance that's not on cooldown
+            var alliance = _allianceBehavior?.FindAlliance(playerClan, targetHero.Clan);
+            return alliance != null && alliance.IsActive && !alliance.IsOnCooldown();
+        }
+
+        private bool ExistingAllianceClickableCondition(out TextObject explanation)
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null)
+            {
+                explanation = new TextObject("{=SA_ExistingAllianceNone}No alliance exists");
+                return false;
+            }
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance == null)
+            {
+                explanation = new TextObject("{=SA_ExistingAllianceNone}No alliance exists");
+                return false;
+            }
+
+            if (alliance.IsOnCooldown())
+            {
+                explanation = new TextObject("{=SA_ExistingAllianceCooldown}Alliance management on cooldown");
+                return false;
+            }
+
+            explanation = new TextObject("{=SA_ExistingAllianceAvailable}Manage existing secret alliance");
+            return true;
         }
 
         private bool CanOfferBribe()
@@ -586,13 +677,50 @@ namespace SecretAlliances
 
         private bool SecretAllianceClickableCondition(out TextObject explanation)
         {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null)
+            {
+                explanation = new TextObject("{=SA_ClickCondition}No valid target");
+                return false;
+            }
+
+            // Check if on cooldown
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            if (alliance != null && alliance.IsOnCooldown())
+            {
+                explanation = new TextObject("{=SA_ClickCooldown}Recently discussed - wait before approaching again");
+                return true;
+            }
+
+            // Check if already allied
+            if (alliance != null)
+            {
+                explanation = new TextObject("{=SA_ClickExistingAlliance}Manage existing alliance");
+                return true;
+            }
+
             explanation = new TextObject("{=SA_ClickCondition}Propose secret coordination");
             return true;
         }
 
         private bool IntelligenceClickableCondition(out TextObject explanation)
         {
-            explanation = new TextObject("{=SA_IntelClickCondition}Gather intelligence");
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero == null)
+            {
+                explanation = new TextObject("{=SA_IntelClickCondition}No target available");
+                return false;
+            }
+
+            if (HasRumorsToShare())
+            {
+                explanation = new TextObject("{=SA_IntelClickHasRumors}Ask about secret dealings (rumors available)");
+            }
+            else
+            {
+                explanation = new TextObject("{=SA_IntelClickNoRumors}Ask about secret dealings (no current intelligence)");
+            }
+            
             return true;
         }
 
