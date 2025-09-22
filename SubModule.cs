@@ -30,12 +30,20 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan == null) return false;
 
-            if (_recentRejections.TryGetValue(targetHero.Clan.Id, out int rejectionDay))
+            try
             {
-                int currentDay = CampaignTime.Now.GetDayOfYear;
-                return currentDay - rejectionDay < 3; // 3 day cooldown
+                if (_recentRejections.TryGetValue(targetHero.Clan.Id, out int rejectionDay))
+                {
+                    int currentDay = CampaignTime.Now.GetDayOfYear;
+                    return currentDay - rejectionDay < 3; // 3 day cooldown
+                }
+                return false;
             }
-            return false;
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error checking rejection cooldown for {targetHero.Clan.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         private void AddRejectionCooldown()
@@ -43,7 +51,21 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan != null)
             {
-                _recentRejections[targetHero.Clan.Id] = CampaignTime.Now.GetDayOfYear;
+                try
+                {
+                    _recentRejections[targetHero.Clan.Id] = CampaignTime.Now.GetDayOfYear;
+                    
+                    // Clean up old rejections (keep only last 10 entries)
+                    if (_recentRejections.Count > 10)
+                    {
+                        var oldestKey = _recentRejections.Keys.First();
+                        _recentRejections.Remove(oldestKey);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AllianceUIHelper.DebugLog($"Error adding rejection cooldown for {targetHero.Clan.Name}: {ex.Message}");
+                }
             }
         }
 
@@ -53,32 +75,65 @@ namespace SecretAlliances
 
             if (starterObject is CampaignGameStarter campaignStarter)
             {
-                // Add the campaign behavior that manages the alliances
-                _allianceBehavior = new SecretAllianceBehavior();
-                campaignStarter.AddBehavior(_allianceBehavior);
-
-                // Register console commands for debugging
-                ConsoleCommands.RegisterCommands();
-
-
-
-                // Register dialog lines for secret alliance system
-                AddDialogs(campaignStarter);
-
-                AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
-
-                InformationManager.DisplayMessage(new InformationMessage("Secret Alliances loaded!", Colors.Cyan));
-
-                // Debug: Dump all alliances on startup for testing
-                // This will show any existing alliances when loading a save
-                if (_allianceBehavior != null)
+                try
                 {
-                    AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                    // Add the campaign behavior that manages the alliances
+                    _allianceBehavior = new SecretAllianceBehavior();
+                    campaignStarter.AddBehavior(_allianceBehavior);
+
+                    // Register console commands for debugging
+                    ConsoleCommands.RegisterCommands();
+
+                    // Register dialog lines for secret alliance system
+                    AddDialogs(campaignStarter);
+
+                    AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
+
+                    InformationManager.DisplayMessage(new InformationMessage("Secret Alliances v1.2.9 compatible loaded!", Colors.Cyan));
+
+                    // Debug: Dump all alliances on startup for testing
+                    // This will show any existing alliances when loading a save
+                    if (_allianceBehavior != null)
+                    {
+                        AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    InformationManager.DisplayMessage(new InformationMessage($"Secret Alliances failed to load: {ex.Message}", Colors.Red));
+                    AllianceUIHelper.DebugLog($"Error in OnGameStart: {ex}");
                 }
             }
         }
 
         private void AddDialogs(CampaignGameStarter starter)
+        {
+            try
+            {
+                AllianceUIHelper.DebugLog("Starting dialogue registration...");
+
+                // Register all dialogue lines with error handling
+                RegisterMainOfferDialogues(starter);
+                RegisterOfferOptionDialogues(starter);
+                RegisterAllianceBranchDialogues(starter);
+                RegisterBribeBranchDialogues(starter);
+                RegisterIntelligenceDialogues(starter);
+                RegisterAllianceStatusDialogues(starter);
+                RegisterAllianceManagementDialogues(starter);
+                RegisterAdvancedFeaturesDialogues(starter);
+
+                AllianceUIHelper.DebugLog("All dialogues registered successfully");
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error registering dialogues: {ex}");
+                InformationManager.DisplayMessage(new InformationMessage("Error loading Secret Alliances dialogues", Colors.Red));
+            }
+        }
+
+        private void RegisterMainOfferDialogues(CampaignGameStarter starter)
+        {
+        private void RegisterMainOfferDialogues(CampaignGameStarter starter)
         {
             // --- MAIN OFFER ---
             starter.AddPlayerLine(
@@ -119,7 +174,12 @@ namespace SecretAlliances
                 "{=SA_LordConsider}Speak carefully. If your proposal has merit, I will listen.",
                 () => true,
                 null);
+        }
 
+        private void RegisterOfferOptionDialogues(CampaignGameStarter starter)
+        {
+        private void RegisterOfferOptionDialogues(CampaignGameStarter starter)
+        {
             // --- OFFER OPTIONS ---
             starter.AddPlayerLine(
                 "sa_offer_alliance",
@@ -144,7 +204,10 @@ namespace SecretAlliances
                 "{=SA_Nevermind}Perhaps another time.",
                 () => true,
                 () => ResetConversationState());
+        }
 
+        private void RegisterAllianceBranchDialogues(CampaignGameStarter starter)
+        {
             // --- ALLIANCE BRANCH ---
             starter.AddDialogLine(
                 "sa_evaluate_offer_line",
@@ -169,9 +232,10 @@ namespace SecretAlliances
                 "{=SA_AllianceReject}The risks are too great. I must decline your proposal at this time.",
                 () => !ShouldAcceptAlliance(),
                 RejectAllianceWithFeedback);
+        }
 
-
-            // --- BRIBE BRANCH ---
+        private void RegisterBribeBranchDialogues(CampaignGameStarter starter)
+        {
             starter.AddDialogLine(
                 "sa_bribe_response_line",
                 "sa_bribe_response",    // comes from sa_offer_bribe
@@ -750,7 +814,15 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
-            return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
+            try
+            {
+                return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error checking rumors for {targetHero.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         private bool SecretAllianceClickableCondition(out TextObject explanation)
@@ -997,27 +1069,34 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return;
 
-            var intelligence = _allianceBehavior?.GetIntelligence();
-            if (intelligence == null || !intelligence.Any()) return;
-
-            // Share some intelligence about secret alliances
-            var relevantIntel = intelligence.Where(i =>
-                i.ReliabilityScore > 0.4f &&
-                i.DaysOld < 30).Take(2);
-
-            foreach (var intel in relevantIntel)
+            try
             {
-                // Player gains knowledge about secret alliances
-                var informer = intel.GetInformer();
-                if (informer?.Clan != null)
-                {
-                    // Improve relation with informant slightly
-                    ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
-                }
-            }
+                var intelligence = _allianceBehavior?.GetIntelligence();
+                if (intelligence == null || !intelligence.Any()) return;
 
-            // Player gains roguery skill for intelligence gathering
-            Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+                // Share some intelligence about secret alliances
+                var relevantIntel = intelligence.Where(i =>
+                    i.ReliabilityScore > 0.4f &&
+                    i.DaysOld < 30).Take(2);
+
+                foreach (var intel in relevantIntel)
+                {
+                    // Player gains knowledge about secret alliances
+                    var informer = intel.GetInformer();
+                    if (informer?.Clan != null)
+                    {
+                        // Improve relation with informant slightly
+                        ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
+                    }
+                }
+
+                // Player gains roguery skill for intelligence gathering
+                Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error sharing intelligence with {targetHero.Name}: {ex.Message}");
+            }
         }
 
         // Helper calculation methods
