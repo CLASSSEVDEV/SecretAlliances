@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
@@ -21,8 +22,52 @@ namespace SecretAlliances
         private bool _lastPactResult = false;
 
 
-        // Add a flag to track rejection
-        private bool _allianceRejected = false;
+        // Add conversation tracking for recently rejected alliances
+        private Dictionary<MBGUID, int> _recentRejections = new Dictionary<MBGUID, int>();
+
+        private bool HasRecentRejection()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            try
+            {
+                if (_recentRejections.TryGetValue(targetHero.Clan.Id, out int rejectionDay))
+                {
+                    int currentDay = CampaignTime.Now.GetDayOfYear;
+                    return currentDay - rejectionDay < 3; // 3 day cooldown
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error checking rejection cooldown for {targetHero.Clan.Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void AddRejectionCooldown()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan != null)
+            {
+                try
+                {
+                    _recentRejections[targetHero.Clan.Id] = CampaignTime.Now.GetDayOfYear;
+                    
+                    // Clean up old rejections (keep only last 10 entries)
+                    if (_recentRejections.Count > 10)
+                    {
+                        var oldestKey = _recentRejections.Keys.First();
+                        _recentRejections.Remove(oldestKey);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AllianceUIHelper.DebugLog($"Error adding rejection cooldown for {targetHero.Clan.Name}: {ex.Message}");
+                }
+            }
+        }
 
         protected override void OnGameStart(Game game, IGameStarter starterObject)
         {
@@ -30,32 +75,62 @@ namespace SecretAlliances
 
             if (starterObject is CampaignGameStarter campaignStarter)
             {
-                // Add the campaign behavior that manages the alliances
-                _allianceBehavior = new SecretAllianceBehavior();
-                campaignStarter.AddBehavior(_allianceBehavior);
-
-                // Register console commands for debugging
-                ConsoleCommands.RegisterCommands();
-
-
-
-                // Register dialog lines for secret alliance system
-                AddDialogs(campaignStarter);
-
-                AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
-
-                InformationManager.DisplayMessage(new InformationMessage("Secret Alliances loaded!", Colors.Cyan));
-
-                // Debug: Dump all alliances on startup for testing
-                // This will show any existing alliances when loading a save
-                if (_allianceBehavior != null)
+                try
                 {
-                    AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                    // Add the campaign behavior that manages the alliances
+                    _allianceBehavior = new SecretAllianceBehavior();
+                    campaignStarter.AddBehavior(_allianceBehavior);
+
+                    // Register console commands for debugging
+                    ConsoleCommands.RegisterCommands();
+
+                    // Register dialog lines for secret alliance system
+                    AddDialogs(campaignStarter);
+
+                    AllianceUIHelper.DebugLog("SubModule.OnGameStart called - dialogs registered");
+
+                    InformationManager.DisplayMessage(new InformationMessage("Secret Alliances v1.2.9 compatible loaded!", Colors.Cyan));
+
+                    // Debug: Dump all alliances on startup for testing
+                    // This will show any existing alliances when loading a save
+                    if (_allianceBehavior != null)
+                    {
+                        AllianceUIHelper.DumpAllAlliances(_allianceBehavior);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    InformationManager.DisplayMessage(new InformationMessage($"Secret Alliances failed to load: {ex.Message}", Colors.Red));
+                    AllianceUIHelper.DebugLog($"Error in OnGameStart: {ex}");
                 }
             }
         }
 
         private void AddDialogs(CampaignGameStarter starter)
+        {
+            try
+            {
+                AllianceUIHelper.DebugLog("Starting dialogue registration...");
+
+                // Register all dialogue lines with error handling
+                RegisterMainOfferDialogues(starter);
+                RegisterOfferOptionDialogues(starter);
+                RegisterAllianceBranchDialogues(starter);
+                RegisterBribeBranchDialogues(starter);
+                RegisterRemainingDialogues(starter); // Contains all intelligence, status, management, and advanced features
+
+                AllianceUIHelper.DebugLog("All dialogues registered successfully");
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error registering dialogues: {ex}");
+                InformationManager.DisplayMessage(new InformationMessage("Error loading Secret Alliances dialogues", Colors.Red));
+            }
+        }
+
+        private void RegisterMainOfferDialogues(CampaignGameStarter starter)
+        {
+        private void RegisterMainOfferDialogues(CampaignGameStarter starter)
         {
             // --- MAIN OFFER ---
             starter.AddPlayerLine(
@@ -63,20 +138,43 @@ namespace SecretAlliances
                 "hero_main_options",
                 "sa_response_consider",
                 "{=SA_PlayerOffer}I have a discreet proposal that could benefit both our clans...",
-                CanOfferSecretAlliance,
+                () => CanOfferSecretAlliance() && !HasRecentRejection(),
                 null,
                 100,
                 SecretAllianceClickableCondition,
                 null);
 
+            // Cooldown version of main offer (higher priority when conditions match)
+            starter.AddPlayerLine(
+                "sa_main_offer_cooldown",
+                "hero_main_options",
+                "sa_rejection_cooldown_response",
+                "{=SA_PlayerOfferCooldown}I have a discreet proposal that could benefit both our clans...",
+                () => CanOfferSecretAlliance() && HasRecentRejection(),
+                null,
+                101, // Higher priority than main offer
+                SecretAllianceClickableCondition,
+                null);
+
             starter.AddDialogLine(
-                "sa_response_consider",
+                "sa_rejection_cooldown_response_line",
+                "sa_rejection_cooldown_response",
+                "hero_main_options",
+                "{=SA_RejectionCooldownResponse}We discussed such matters recently. I need time to consider your proposal fully.",
+                () => true,
+                null);
+
+            starter.AddDialogLine(
+                "sa_response_consider_line",
                 "sa_response_consider",   // matches output of sa_main_offer
                 "sa_player_options",
                 "{=SA_LordConsider}Speak carefully. If your proposal has merit, I will listen.",
                 () => true,
                 null);
+        }
 
+        private void RegisterOfferOptionDialogues(CampaignGameStarter starter)
+        {
             // --- OFFER OPTIONS ---
             starter.AddPlayerLine(
                 "sa_offer_alliance",
@@ -91,20 +189,23 @@ namespace SecretAlliances
                 "sa_player_options",
                 "sa_bribe_response",
                 "{=SA_OfferBribe}I'm prepared to offer compensation...",
-                () => _allianceRejected && CanOfferBribe(),
+                () => HasRecentRejection() && CanOfferBribe(),
                 null);
 
             starter.AddPlayerLine(
                 "sa_nevermind",
                 "sa_player_options",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_Nevermind}Perhaps another time.",
                 () => true,
                 () => ResetConversationState());
+        }
 
+        private void RegisterAllianceBranchDialogues(CampaignGameStarter starter)
+        {
             // --- ALLIANCE BRANCH ---
             starter.AddDialogLine(
-                "sa_evaluate_offer",
+                "sa_evaluate_offer_line",
                 "sa_evaluate_offer",    // comes from sa_offer_alliance
                 "sa_alliance_decision",
                 "{=SA_EvaluateOffer}An interesting proposition...",
@@ -114,7 +215,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_accept",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_AllianceAccept}Very well. Our clans shall coordinate in secret.",
                 ShouldAcceptAlliance,
                 AcceptAlliance);
@@ -122,15 +223,19 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_reject",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_AllianceReject}The risks are too great. I must decline your proposal at this time.",
                 () => !ShouldAcceptAlliance(),
                 RejectAllianceWithFeedback);
+        }
 
-
+        private void RegisterBribeBranchDialogues(CampaignGameStarter starter)
+        {
+        private void RegisterBribeBranchDialogues(CampaignGameStarter starter)
+        {
             // --- BRIBE BRANCH ---
             starter.AddDialogLine(
-                "sa_bribe_response",
+                "sa_bribe_response_line",
                 "sa_bribe_response",    // comes from sa_offer_bribe
                 "sa_bribe_decision",
                 "{=SA_BribeResponse}Gold speaks louder than words...",
@@ -164,7 +269,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_accept",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_BribeAccept}Your generosity is noted...",
                 ShouldAcceptBribe,
                 AcceptBribe);
@@ -172,12 +277,38 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_reject",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_BribeReject}My loyalty is worth more than gold...",
                 () => !ShouldAcceptBribe(),
                 () => ResetConversationState());
+        }
 
+        private void RegisterIntelligenceDialogues(CampaignGameStarter starter)
+        {
+            // Comprehensive intelligence and rumor dialogues implemented in full method below
+            // This includes all the myth, legend, and political conversation trees
+        }
 
+        private void RegisterAllianceStatusDialogues(CampaignGameStarter starter)
+        {
+            // Alliance status and management dialogues
+        }
+
+        private void RegisterAllianceManagementDialogues(CampaignGameStarter starter)
+        {
+            // Advanced alliance management features
+        }
+
+        private void RegisterAdvancedFeaturesDialogues(CampaignGameStarter starter)
+        {
+            // Economic warfare, spy operations, joint campaigns
+        }
+
+        // Temporary method to complete registration - all dialogue content preserved
+        private void RegisterRemainingDialogues(CampaignGameStarter starter)
+        {
+            // === ALL INTELLIGENCE AND ADVANCED DIALOGUES ===
+            
             // --- INTELLIGENCE ---
             starter.AddPlayerLine(
                 "sa_gather_info",
@@ -192,18 +323,43 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_info_response_has_rumors",
-                "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "sa_info_response",
+                "sa_rumor_topics",
                 "{=SA_InfoResponseRumors}Indeed, there are whispers of secret dealings...",
                 () => HasRumorsToShare(),
-                ShareIntelligence);
+                null);
 
             starter.AddDialogLine(
                 "sa_info_response_no_rumors",
-                "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "sa_info_response",
+                "hero_main_options",
                 "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
                 () => !HasRumorsToShare(),
+                null);
+
+            // --- RUMOR TOPICS ---
+            starter.AddPlayerLine(
+                "sa_ask_alliances",
+                "sa_rumor_topics",
+                "sa_alliance_rumors",
+                "{=SA_AskAlliances}Tell me about secret alliances.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_ask_myths",
+                "sa_rumor_topics",
+                "sa_myth_topics",
+                "{=SA_AskMyths}Do you know any myths or legends?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_rumor_nevermind",
+                "sa_rumor_topics",
+                "hero_main_options",
+                "{=SA_RumorNevermind}Perhaps another time.",
+                () => true,
                 null);
 
             // --- ALLIANCE STATUS ---
@@ -217,7 +373,311 @@ namespace SecretAlliances
                 100);
 
             starter.AddDialogLine(
+                "sa_status_display_line",
                 "sa_status_display",
+                "hero_main_options",
+                "{=SA_StatusDisplay}Let me update you on our current understanding...",
+                () => true,
+                DisplayAllianceStatus);
+
+            // --- ALLIANCE MANAGEMENT ---
+            starter.AddPlayerLine(
+                "sa_deepen_pact",
+                "hero_main_options",
+                "sa_pact_options",
+                "{=SA_DeepenPact}Perhaps we should deepen our arrangement...",
+                () => CanDeepenPact() && !IsAllianceOnCooldown(),
+                null,
+                100);
+
+            starter.AddPlayerLine(
+                "sa_deepen_pact_cooldown",
+                "hero_main_options",
+                "sa_cooldown_response",
+                "{=SA_DeepenPactCooldown}Perhaps we should deepen our arrangement...",
+                () => CanDeepenPact() && IsAllianceOnCooldown(),
+                null,
+                101);
+
+            starter.AddDialogLine(
+                "sa_cooldown_response_line",
+                "sa_cooldown_response",
+                "hero_main_options",
+                "{=SA_CooldownResponse}We have spoken of such matters recently. Give it time...",
+                () => true,
+                null);
+
+            // --- PACT OPTIONS ---
+            starter.AddPlayerLine(
+                "sa_trade_pact",
+                "sa_pact_options",
+                "sa_pact_result",
+                "{=SA_TradePact}We should coordinate our trade efforts.",
+                () => true,
+                () => TrySetTradePact());
+
+            starter.AddPlayerLine(
+                "sa_military_pact",
+                "sa_pact_options",
+                "sa_pact_result",
+                "{=SA_MilitaryPact}Our military forces should work together.",
+                () => true,
+                () => TrySetMilitaryPact());
+
+            starter.AddPlayerLine(
+                "sa_pact_nevermind",
+                "sa_pact_options",
+                "hero_main_options",
+                "{=SA_PactNevermind}On second thought, our current arrangement is sufficient.",
+                () => true,
+                null);
+
+            // --- PACT RESULTS ---
+            starter.AddDialogLine(
+                "sa_pact_success",
+                "sa_pact_result",
+                "hero_main_options",
+                "{=SA_PactSuccess}Agreed. This coordination will benefit us both.",
+                () => _lastPactResult,
+                () => ResetConversationState());
+
+            starter.AddDialogLine(
+                "sa_pact_failure",
+                "sa_pact_result",
+                "hero_main_options",
+                "{=SA_PactFailure}Perhaps we should wait before making such arrangements.",
+                () => !_lastPactResult,
+                () => ResetConversationState());
+        }
+            starter.AddPlayerLine(
+                "sa_gather_info",
+                "hero_main_options",
+                "sa_info_response",
+                "{=SA_GatherInfo}Have you heard any rumors?",
+                CanGatherIntelligence,
+                null,
+                100,
+                IntelligenceClickableCondition,
+                null);
+
+            starter.AddDialogLine(
+                "sa_info_response_has_rumors",
+                "sa_info_response",   // comes from sa_gather_info
+                "sa_rumor_topics",
+                "{=SA_InfoResponseRumors}Indeed, there are whispers of secret dealings...",
+                () => HasRumorsToShare(),
+                null);
+
+            starter.AddDialogLine(
+                "sa_info_response_no_rumors",
+                "sa_info_response",   // comes from sa_gather_info
+                "hero_main_options",
+                "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
+                () => !HasRumorsToShare(),
+                null);
+
+            // --- RUMOR TOPICS ---
+            starter.AddPlayerLine(
+                "sa_ask_alliances",
+                "sa_rumor_topics",
+                "sa_alliance_rumors",
+                "{=SA_AskAlliances}Tell me about secret alliances.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_ask_myths",
+                "sa_rumor_topics",
+                "sa_myth_topics",
+                "{=SA_AskMyths}Do you know any myths or legends?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_ask_politics",
+                "sa_rumor_topics",
+                "sa_political_rumors",
+                "{=SA_AskPolitics}What's happening in the political sphere?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_rumor_nevermind",
+                "sa_rumor_topics",
+                "hero_main_options",
+                "{=SA_RumorNevermind}Perhaps another time.",
+                () => true,
+                null);
+
+            // --- ALLIANCE RUMORS ---
+            starter.AddDialogLine(
+                "sa_alliance_rumors_line",
+                "sa_alliance_rumors",
+                "sa_alliance_detail",
+                "{=SA_AllianceRumors}There are whispers of clans working together in shadows...",
+                () => true,
+                ShareIntelligence);
+
+            starter.AddPlayerLine(
+                "sa_alliance_tell_more",
+                "sa_alliance_detail",
+                "sa_alliance_more_detail",
+                "{=SA_AllianceTellMore}Tell me more about these arrangements.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_alliance_enough",
+                "sa_alliance_detail",
+                "hero_main_options",
+                "{=SA_AllianceEnough}That's enough for now.",
+                () => true,
+                null);
+
+            starter.AddDialogLine(
+                "sa_alliance_more_detail_line",
+                "sa_alliance_more_detail",
+                "hero_main_options",
+                "{=SA_AllianceMoreDetail}Some say gold changes hands, others speak of military coordination. Trust is a rare commodity in these times.",
+                () => true,
+                null);
+
+            // --- MYTH TOPICS ---
+            starter.AddPlayerLine(
+                "sa_myth_dragons",
+                "sa_myth_topics",
+                "sa_dragon_tale",
+                "{=SA_MythDragons}Tell me about dragons.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_myth_heroes",
+                "sa_myth_topics",
+                "sa_hero_tale",
+                "{=SA_MythHeroes}What tales of ancient heroes do you know?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_myth_back",
+                "sa_myth_topics",
+                "sa_rumor_topics",
+                "{=SA_MythBack}Let's talk about something else.",
+                () => true,
+                null);
+
+            // --- DRAGON TALES ---
+            starter.AddDialogLine(
+                "sa_dragon_tale_line",
+                "sa_dragon_tale",
+                "sa_dragon_detail",
+                "{=SA_DragonTale}Ah, the great wyrms of old... they say they slumber in the deepest mountains.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_dragon_tell_more",
+                "sa_dragon_detail",
+                "sa_dragon_more_detail",
+                "{=SA_DragonTellMore}Tell me more about these dragons.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_dragon_enough",
+                "sa_dragon_detail",
+                "sa_myth_topics",
+                "{=SA_DragonEnough}Interesting. What else do you know?",
+                () => true,
+                null);
+
+            starter.AddDialogLine(
+                "sa_dragon_more_detail_line",
+                "sa_dragon_more_detail",
+                "sa_myth_topics",
+                "{=SA_DragonMoreDetail}Legend speaks of vast hoards and ancient magic. Some believe they still watch over the realm, waiting for the time of greatest need.",
+                () => true,
+                null);
+
+            // --- HERO TALES ---
+            starter.AddDialogLine(
+                "sa_hero_tale_line",
+                "sa_hero_tale",
+                "sa_hero_detail",
+                "{=SA_HeroTale}The chronicles speak of warriors who shaped the very foundations of our kingdoms...",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_hero_tell_more",
+                "sa_hero_detail",
+                "sa_hero_more_detail",
+                "{=SA_HeroTellMore}Tell me more about these ancient warriors.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_hero_enough",
+                "sa_hero_detail",
+                "sa_myth_topics",
+                "{=SA_HeroEnough}Fascinating. Any other tales?",
+                () => true,
+                null);
+
+            starter.AddDialogLine(
+                "sa_hero_more_detail_line",
+                "sa_hero_more_detail",
+                "sa_myth_topics",
+                "{=SA_HeroMoreDetail}They fought with valor beyond measure, united kingdoms through both sword and diplomacy. Perhaps their spirit lives on in those who seek to build alliances today.",
+                () => true,
+                null);
+
+            // --- POLITICAL RUMORS ---
+            starter.AddDialogLine(
+                "sa_political_rumors_line",
+                "sa_political_rumors",
+                "sa_political_detail",
+                "{=SA_PoliticalRumors}The courts are full of intrigue. Marriages, treaties, and betrayals shape the balance of power.",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_political_tell_more",
+                "sa_political_detail",
+                "sa_political_more_detail",
+                "{=SA_PoliticalTellMore}What specific intrigues have you heard about?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_political_enough",
+                "sa_political_detail",
+                "sa_rumor_topics",
+                "{=SA_PoliticalEnough}That's all I need to know for now.",
+                () => true,
+                null);
+
+            starter.AddDialogLine(
+                "sa_political_more_detail_line",
+                "sa_political_more_detail",
+                "sa_rumor_topics",
+                "{=SA_PoliticalMoreDetail}Some lords grow restless with their liege's decisions. Others seek new alliances to secure their position. The wise ruler keeps both ears open and tongue careful.",
+                () => true,
+                null);
+
+            // --- ALLIANCE STATUS ---
+            starter.AddPlayerLine(
+                "sa_view_status",
+                "hero_main_options",
+                "sa_status_display",
+                "{=SA_ViewStatus}What is the status of our arrangements?",
+                CanViewAllianceStatus,
+                null,
+                100);
+
+            starter.AddDialogLine(
+                "sa_status_display_line",
                 "sa_status_display",
                 "hero_main_options",
                 "{=SA_StatusDisplay}Let me update you on our current understanding...",
@@ -230,9 +690,27 @@ namespace SecretAlliances
                 "hero_main_options",
                 "sa_pact_options",
                 "{=SA_DeepenPact}Perhaps we should deepen our arrangement...",
-                CanDeepenPact,
+                () => CanDeepenPact() && !IsAllianceOnCooldown(),
                 null,
                 100);
+
+            // Cooldown version of deepen pact (higher priority when conditions match)
+            starter.AddPlayerLine(
+                "sa_deepen_pact_cooldown",
+                "hero_main_options",
+                "sa_cooldown_response",
+                "{=SA_DeepenPactCooldown}Perhaps we should deepen our arrangement...",
+                () => CanDeepenPact() && IsAllianceOnCooldown(),
+                null,
+                101); // Higher priority than main deepen pact
+
+            starter.AddDialogLine(
+                "sa_cooldown_response_line",
+                "sa_cooldown_response",
+                "hero_main_options",
+                "{=SA_CooldownResponse}We have spoken of such matters recently. Give it time...",
+                () => true,
+                null);
 
             starter.AddPlayerLine(
                 "sa_dissolve_alliance",
@@ -287,7 +765,7 @@ namespace SecretAlliances
 
             // --- DISSOLUTION ---
             starter.AddDialogLine(
-                "sa_dissolve_confirm",
+                "sa_dissolve_confirm_line",
                 "sa_dissolve_confirm",
                 "sa_dissolve_final",
                 "{=SA_DissolveConfirm}If that is your wish...",
@@ -347,7 +825,7 @@ namespace SecretAlliances
                 100);
 
             starter.AddDialogLine(
-                "sa_economic_target",
+                "sa_economic_target_line",
                 "sa_economic_target",
                 "hero_main_options",
                 "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well.",
@@ -365,7 +843,7 @@ namespace SecretAlliances
                 100);
 
             starter.AddDialogLine(
-                "sa_spy_target",
+                "sa_spy_target_line",
                 "sa_spy_target",
                 "hero_main_options",
                 "{=SA_SpyTarget}Information is indeed the greatest weapon.",
@@ -383,7 +861,7 @@ namespace SecretAlliances
                 100);
 
             starter.AddDialogLine(
-                "sa_campaign_target",
+                "sa_campaign_target_line",
                 "sa_campaign_target",
                 "hero_main_options",
                 "{=SA_CampaignTarget}Our combined forces shall be unstoppable.",
@@ -391,6 +869,29 @@ namespace SecretAlliances
                 LaunchJointCampaign);
         }
 
+
+        // Add conversation tracking to prevent duplicates
+        private HashSet<string> _activeDialogueIds = new HashSet<string>();
+
+        private bool IsDialogueActive(string dialogueId)
+        {
+            return _activeDialogueIds.Contains(dialogueId);
+        }
+
+        private void ActivateDialogue(string dialogueId)
+        {
+            _activeDialogueIds.Add(dialogueId);
+        }
+
+        private void DeactivateDialogue(string dialogueId)
+        {
+            _activeDialogueIds.Remove(dialogueId);
+        }
+
+        private void ClearActiveDialogues()
+        {
+            _activeDialogueIds.Clear();
+        }
 
         // Conversation condition methods
         private bool CanOfferSecretAlliance()
@@ -476,11 +977,33 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
-            return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
+            try
+            {
+                return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error checking rumors for {targetHero.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         private bool SecretAllianceClickableCondition(out TextObject explanation)
         {
+            var targetHero = Hero.OneToOneConversationHero;
+            
+            if (targetHero?.Clan == null)
+            {
+                explanation = new TextObject("{=SA_ClickConditionInvalid}Cannot propose alliance");
+                return false;
+            }
+
+            if (HasRecentRejection())
+            {
+                explanation = new TextObject("{=SA_ClickConditionCooldown}We discussed this recently");
+                return true;
+            }
+
             explanation = new TextObject("{=SA_ClickCondition}Propose secret coordination");
             return true;
         }
@@ -501,10 +1024,9 @@ namespace SecretAlliances
 
             // Use the local method instead of the behavior's method
             _currentAllianceEvaluationScore = CalculateAllianceAcceptanceScore(playerClan, targetHero.Clan);
-            _allianceRejected = _currentAllianceEvaluationScore < 65; // More consistent threshold
 
             // Debug logging to help players understand rejections
-            if (_allianceRejected)
+            if (_currentAllianceEvaluationScore < 65)
             {
                 AllianceUIHelper.DebugLog($"Alliance proposal rejected by {targetHero.Clan.Name} (Score: {_currentAllianceEvaluationScore}/100)");
             }
@@ -593,6 +1115,9 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan != null)
             {
+                // Add rejection cooldown
+                AddRejectionCooldown();
+
                 // Provide helpful feedback to the player about why the alliance was rejected
                 string feedbackMessage = GenerateRejectionFeedback(targetHero.Clan, _currentAllianceEvaluationScore);
                 InformationManager.DisplayMessage(new InformationMessage(feedbackMessage, Colors.Red));
@@ -707,27 +1232,34 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return;
 
-            var intelligence = _allianceBehavior?.GetIntelligence();
-            if (intelligence == null || !intelligence.Any()) return;
-
-            // Share some intelligence about secret alliances
-            var relevantIntel = intelligence.Where(i =>
-                i.ReliabilityScore > 0.4f &&
-                i.DaysOld < 30).Take(2);
-
-            foreach (var intel in relevantIntel)
+            try
             {
-                // Player gains knowledge about secret alliances
-                var informer = intel.GetInformer();
-                if (informer?.Clan != null)
-                {
-                    // Improve relation with informant slightly
-                    ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
-                }
-            }
+                var intelligence = _allianceBehavior?.GetIntelligence();
+                if (intelligence == null || !intelligence.Any()) return;
 
-            // Player gains roguery skill for intelligence gathering
-            Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+                // Share some intelligence about secret alliances
+                var relevantIntel = intelligence.Where(i =>
+                    i.ReliabilityScore > 0.4f &&
+                    i.DaysOld < 30).Take(2);
+
+                foreach (var intel in relevantIntel)
+                {
+                    // Player gains knowledge about secret alliances
+                    var informer = intel.GetInformer();
+                    if (informer?.Clan != null)
+                    {
+                        // Improve relation with informant slightly
+                        ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
+                    }
+                }
+
+                // Player gains roguery skill for intelligence gathering
+                Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+            }
+            catch (Exception ex)
+            {
+                AllianceUIHelper.DebugLog($"Error sharing intelligence with {targetHero.Name}: {ex.Message}");
+            }
         }
 
         // Helper calculation methods
@@ -892,7 +1424,16 @@ namespace SecretAlliances
             if (targetHero?.Clan == null) return false;
 
             var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
-            return alliance != null && alliance.IsActive && !alliance.IsOnCooldown();
+            return alliance != null && alliance.IsActive; // Always show if alliance exists
+        }
+
+        private bool IsAllianceOnCooldown()
+        {
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+
+            var alliance = _allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan);
+            return alliance != null && alliance.IsOnCooldown();
         }
 
         private bool CanDissolveAlliance()
