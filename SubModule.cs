@@ -19,7 +19,7 @@ namespace SecretAlliances
         private int _currentBribeReceptivity = 0;
         private int _currentBribeAmount = 0;
         private bool _lastPactResult = false;
-
+        private bool _hasTriedBribing = false;
 
         // Add a flag to track rejection
         private bool _allianceRejected = false;
@@ -71,7 +71,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_response_consider",
-                "sa_response_consider",   // matches output of sa_main_offer
+                "sa_response_consider",   // comes from sa_main_offer
                 "sa_player_options",
                 "{=SA_LordConsider}Speak carefully. If your proposal has merit, I will listen.",
                 () => true,
@@ -91,13 +91,13 @@ namespace SecretAlliances
                 "sa_player_options",
                 "sa_bribe_response",
                 "{=SA_OfferBribe}I'm prepared to offer compensation...",
-                () => _allianceRejected && CanOfferBribe(),
+                () => _allianceRejected && CanOfferBribe() && !_hasTriedBribing,
                 null);
 
             starter.AddPlayerLine(
                 "sa_nevermind",
                 "sa_player_options",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_Nevermind}Perhaps another time.",
                 () => true,
                 () => ResetConversationState());
@@ -114,7 +114,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_accept",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_AllianceAccept}Very well. Our clans shall coordinate in secret.",
                 ShouldAcceptAlliance,
                 AcceptAlliance);
@@ -122,10 +122,27 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_reject",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "sa_player_options",
                 "{=SA_AllianceReject}The risks are too great. I must decline your proposal at this time.",
                 () => !ShouldAcceptAlliance(),
                 RejectAllianceWithFeedback);
+
+            // Add a return option after alliance rejection to allow trying bribe or leaving
+            starter.AddPlayerLine(
+                "sa_alliance_rejected_try_bribe",
+                "sa_player_options",
+                "sa_bribe_response",
+                "{=SA_AllianceRejectedTryBribe}Perhaps gold could change your mind...",
+                () => _allianceRejected && CanOfferBribe() && !_hasTriedBribing,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_alliance_rejected_accept",
+                "sa_player_options",
+                "hero_main_options",
+                "{=SA_AllianceRejectedAccept}I understand your position.",
+                () => _allianceRejected,
+                () => ResetConversationState());
 
 
             // --- BRIBE BRANCH ---
@@ -164,7 +181,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_accept",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_BribeAccept}Your generosity is noted...",
                 ShouldAcceptBribe,
                 AcceptBribe);
@@ -172,9 +189,18 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_reject",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "sa_player_options",
                 "{=SA_BribeReject}My loyalty is worth more than gold...",
                 () => !ShouldAcceptBribe(),
+                () => ResetConversationState());
+
+            // Add player option to return to main menu after bribe rejection
+            starter.AddPlayerLine(
+                "sa_bribe_rejected_return",
+                "sa_player_options",
+                "hero_main_options",
+                "{=SA_BribeRejectedReturn}I understand. Perhaps another time.",
+                () => _hasTriedBribing,
                 () => ResetConversationState());
 
 
@@ -193,7 +219,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_info_response_has_rumors",
                 "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_InfoResponseRumors}Indeed, there are whispers of secret dealings...",
                 () => HasRumorsToShare(),
                 ShareIntelligence);
@@ -201,7 +227,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_info_response_no_rumors",
                 "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
                 () => !HasRumorsToShare(),
                 null);
@@ -288,7 +314,7 @@ namespace SecretAlliances
             // --- DISSOLUTION ---
             starter.AddDialogLine(
                 "sa_dissolve_confirm",
-                "sa_dissolve_confirm",
+                "sa_dissolve_confirm",  // comes from sa_dissolve_alliance
                 "sa_dissolve_final",
                 "{=SA_DissolveConfirm}If that is your wish...",
                 () => true,
@@ -348,7 +374,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_economic_target",
-                "sa_economic_target",
+                "sa_economic_target",  // comes from sa_economic_warfare
                 "hero_main_options",
                 "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well.",
                 () => true,
@@ -366,7 +392,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_spy_target",
-                "sa_spy_target",
+                "sa_spy_target",  // comes from sa_spy_operations
                 "hero_main_options",
                 "{=SA_SpyTarget}Information is indeed the greatest weapon.",
                 () => true,
@@ -384,7 +410,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_campaign_target",
-                "sa_campaign_target",
+                "sa_campaign_target",  // comes from sa_joint_campaign
                 "hero_main_options",
                 "{=SA_CampaignTarget}Our combined forces shall be unstoppable.",
                 () => true,
@@ -415,6 +441,11 @@ namespace SecretAlliances
         private bool CanOfferBribe()
         {
             return Hero.MainHero?.Gold >= 1000;
+        }
+
+        private bool HasAlreadyTriedBribing()
+        {
+            return _hasTriedBribing;
         }
 
         private bool CanViewAllianceStatus()
@@ -476,6 +507,7 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
+            // Use the version that returns bool and string
             return _allianceBehavior?.TryGetRumorsForHero(targetHero, out _) ?? false;
         }
 
@@ -516,15 +548,15 @@ namespace SecretAlliances
 
             if (targetHero?.Clan == null) return;
 
+            // Mark that we've tried bribing
+            _hasTriedBribing = true;
+            
             // Store bribe evaluation for later decision
-            // AFTER
-            // AFTER
             _currentBribeReceptivity = CalculateBribeReceptivity(targetHero);
         }
 
         private void SetBribeAmount(int amount)
         {
-            // AFTER
             _currentBribeAmount = amount;
         }
 
@@ -550,11 +582,9 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
-            // AFTER: Use our private fields directly
+            // Use our private fields directly
             int amount = _currentBribeAmount;
             int receptivity = _currentBribeReceptivity;
-
-
 
             // Calculate acceptance based on amount and receptivity
             int acceptanceThreshold = 100 - receptivity;
@@ -593,6 +623,9 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan != null)
             {
+                // Set the rejection flag to enable bribe options
+                _allianceRejected = true;
+                
                 // Provide helpful feedback to the player about why the alliance was rejected
                 string feedbackMessage = GenerateRejectionFeedback(targetHero.Clan, _currentAllianceEvaluationScore);
                 InformationManager.DisplayMessage(new InformationMessage(feedbackMessage, Colors.Red));
@@ -601,7 +634,7 @@ namespace SecretAlliances
                 AllianceUIHelper.DebugLog($"Alliance rejected by {targetHero.Clan.Name}: {feedbackMessage}");
             }
 
-            ResetConversationState();
+            // Don't reset conversation state here - allow player to try bribe option
         }
 
         private string GenerateRejectionFeedback(Clan targetClan, int score)
@@ -665,6 +698,8 @@ namespace SecretAlliances
             _currentBribeReceptivity = 0;
             _currentBribeAmount = 0;
             _lastPactResult = false;
+            _allianceRejected = false;
+            _hasTriedBribing = false;
         }
 
         private void AcceptBribe()
@@ -707,27 +742,25 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return;
 
-            var intelligence = _allianceBehavior?.GetIntelligence();
-            if (intelligence == null || !intelligence.Any()) return;
-
-            // Share some intelligence about secret alliances
-            var relevantIntel = intelligence.Where(i =>
-                i.ReliabilityScore > 0.4f &&
-                i.DaysOld < 30).Take(2);
-
-            foreach (var intel in relevantIntel)
+            // Use the more appropriate rumor sharing method
+            var rumors = _allianceBehavior?.TryGetRumorsForHero(targetHero, Clan.PlayerClan, 2);
+            if (rumors != null && rumors.Any())
             {
-                // Player gains knowledge about secret alliances
-                var informer = intel.GetInformer();
-                if (informer?.Clan != null)
+                foreach (var rumor in rumors)
                 {
-                    // Improve relation with informant slightly
-                    ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
+                    InformationManager.DisplayMessage(new InformationMessage($"Intelligence: {rumor}", Colors.Yellow));
                 }
+                
+                // Player gains roguery skill for intelligence gathering
+                Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+                
+                // Improve relation with informant slightly
+                ChangeRelationAction.ApplyPlayerRelation(targetHero, 2, false, false);
             }
-
-            // Player gains roguery skill for intelligence gathering
-            Hero.MainHero.AddSkillXp(DefaultSkills.Roguery, 50);
+            else
+            {
+                InformationManager.DisplayMessage(new InformationMessage("No useful intelligence available.", Colors.Gray));
+            }
         }
 
         // Helper calculation methods
