@@ -450,7 +450,6 @@ namespace SecretAlliances
 
         private bool _lastUpgradeResult = false;
 
-        // Conversation condition methods
         private bool CanOfferSecretAlliance()
         {
             var targetHero = Hero.OneToOneConversationHero;
@@ -472,7 +471,14 @@ namespace SecretAlliances
 
         private bool CanOfferBribe()
         {
-            return Hero.MainHero?.Gold >= 1000;
+            var targetHero = Hero.OneToOneConversationHero;
+            if (targetHero?.Clan == null) return false;
+            
+            // Can only bribe if we have gold and they're not already allied
+            if (Hero.MainHero?.Gold < 1000) return false;
+            if (_allianceBehavior?.FindAlliance(Clan.PlayerClan, targetHero.Clan) != null) return false;
+            
+            return true;
         }
 
         private bool CanViewAllianceStatus()
@@ -555,7 +561,12 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             var playerClan = Clan.PlayerClan;
 
-            if (targetHero?.Clan == null || playerClan == null) return;
+            if (targetHero?.Clan == null || playerClan == null) 
+            {
+                _allianceRejected = true;
+                _currentAllianceEvaluationScore = 0;
+                return;
+            }
 
             // Use the local method instead of the behavior's method
             _currentAllianceEvaluationScore = CalculateAllianceAcceptanceScore(playerClan, targetHero.Clan);
@@ -572,17 +583,18 @@ namespace SecretAlliances
         {
             var targetHero = Hero.OneToOneConversationHero;
 
-            if (targetHero?.Clan == null) return;
+            if (targetHero?.Clan == null) 
+            {
+                _currentBribeReceptivity = 0;
+                return;
+            }
 
             // Store bribe evaluation for later decision
-            // AFTER
-            // AFTER
             _currentBribeReceptivity = CalculateBribeReceptivity(targetHero);
         }
 
         private void SetBribeAmount(int amount)
         {
-            // AFTER
             _currentBribeAmount = amount;
         }
 
@@ -608,11 +620,8 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
-            // AFTER: Use our private fields directly
             int amount = _currentBribeAmount;
             int receptivity = _currentBribeReceptivity;
-
-
 
             // Calculate acceptance based on amount and receptivity
             int acceptanceThreshold = 100 - receptivity;
@@ -627,7 +636,13 @@ namespace SecretAlliances
             var playerClan = Clan.PlayerClan;
 
             if (targetHero?.Clan == null || playerClan == null) return;
-            if (_allianceBehavior?.FindAlliance(playerClan, targetHero.Clan) != null) return;
+
+            // Check if alliance already exists
+            if (_allianceBehavior?.FindAlliance(playerClan, targetHero.Clan) != null) 
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Alliance already exists!", Colors.Red));
+                return;
+            }
 
             float initialSecrecy = 0.75f + (MBRandom.RandomFloat * 0.2f);
             float initialStrength = 0.08f + (MBRandom.RandomFloat * 0.12f);
@@ -640,7 +655,6 @@ namespace SecretAlliances
             ChangeClanInfluenceAction.Apply(playerClan, -10f);
 
             InformationManager.DisplayMessage(new InformationMessage($"Secret alliance formed with {targetHero.Clan.Name}!", Colors.Green));
-
 
             // Reset conversation state
             ResetConversationState();
@@ -737,8 +751,21 @@ namespace SecretAlliances
 
             if (targetHero?.Clan == null || playerClan == null) return;
 
-
             int amount = _currentBribeAmount;
+
+            // Validate the player can afford it
+            if (Hero.MainHero.Gold < amount) 
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Insufficient funds for bribe!", Colors.Red));
+                return;
+            }
+
+            // Check if alliance already exists
+            if (_allianceBehavior?.FindAlliance(playerClan, targetHero.Clan) != null) 
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Alliance already exists!", Colors.Red));
+                return;
+            }
 
             // Transfer money
             GiveGoldAction.ApplyBetweenCharacters(Hero.MainHero, targetHero, amount, false);
@@ -758,8 +785,6 @@ namespace SecretAlliances
                 targetHero.AddSkillXp(DefaultSkills.Roguery, 100); // Becomes more roguish
             }
             InformationManager.DisplayMessage(new InformationMessage($"Bribed alliance formed with {targetHero.Clan.Name} for {amount} denars!", Colors.Yellow));
-
-
 
             // Reset conversation state
             ResetConversationState();
