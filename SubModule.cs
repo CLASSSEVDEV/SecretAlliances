@@ -97,7 +97,7 @@ namespace SecretAlliances
             starter.AddPlayerLine(
                 "sa_nevermind",
                 "sa_player_options",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_Nevermind}Perhaps another time.",
                 () => true,
                 () => ResetConversationState());
@@ -114,7 +114,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_accept",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_AllianceAccept}Very well. Our clans shall coordinate in secret.",
                 ShouldAcceptAlliance,
                 AcceptAlliance);
@@ -122,7 +122,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_alliance_reject",
                 "sa_alliance_decision",
-                "lord_pretalk",
+                "sa_player_options",
                 "{=SA_AllianceReject}The risks are too great. I must decline your proposal at this time.",
                 () => !ShouldAcceptAlliance(),
                 RejectAllianceWithFeedback);
@@ -161,10 +161,18 @@ namespace SecretAlliances
                 () => Hero.MainHero.Gold >= 5000,
                 () => SetBribeAmount(5000));
 
+            starter.AddPlayerLine(
+                "sa_bribe_nevermind",
+                "sa_bribe_decision",
+                "sa_player_options",
+                "{=SA_BribeNevermind}On second thought, perhaps there's another way.",
+                () => true,
+                () => ResetConversationState());
+
             starter.AddDialogLine(
                 "sa_bribe_accept",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_BribeAccept}Your generosity is noted...",
                 ShouldAcceptBribe,
                 AcceptBribe);
@@ -172,7 +180,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_bribe_reject",
                 "sa_bribe_result",
-                "lord_pretalk",
+                "sa_player_options",
                 "{=SA_BribeReject}My loyalty is worth more than gold...",
                 () => !ShouldAcceptBribe(),
                 () => ResetConversationState());
@@ -193,7 +201,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_info_response_has_rumors",
                 "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_InfoResponseRumors}Indeed, there are whispers of secret dealings...",
                 () => HasRumorsToShare(),
                 ShareIntelligence);
@@ -201,7 +209,7 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_info_response_no_rumors",
                 "sa_info_response",   // comes from sa_gather_info
-                "lord_pretalk",
+                "hero_main_options",
                 "{=SA_InfoResponseNoRumors}I know nothing of such matters.",
                 () => !HasRumorsToShare(),
                 null);
@@ -317,7 +325,7 @@ namespace SecretAlliances
                 "sa_upgrade_result",
                 "{=SA_UpgradeAlliance}Our alliance could reach new heights...",
                 CanUpgradeAlliance,
-                null,
+                () => { _lastUpgradeResult = TryUpgradeCurrentAlliance(); },
                 100);
 
             starter.AddDialogLine(
@@ -325,7 +333,7 @@ namespace SecretAlliances
                 "sa_upgrade_result",
                 "hero_main_options",
                 "{=SA_UpgradeSuccess}Indeed, our cooperation shall expand.",
-                () => TryUpgradeCurrentAlliance(),
+                () => _lastUpgradeResult,
                 () => ResetConversationState());
 
             starter.AddDialogLine(
@@ -333,7 +341,7 @@ namespace SecretAlliances
                 "sa_upgrade_result",
                 "hero_main_options",
                 "{=SA_UpgradeFailure}We are not yet ready for such advancement.",
-                () => !TryUpgradeCurrentAlliance(),
+                () => !_lastUpgradeResult,
                 () => ResetConversationState());
 
             // --- ECONOMIC WARFARE ---
@@ -349,10 +357,26 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_economic_target",
                 "sa_economic_target",
+                "sa_economic_choice",
+                "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well. How shall we proceed?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_economic_proceed",
+                "sa_economic_choice",
                 "hero_main_options",
-                "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well.",
+                "{=SA_EconomicProceed}Launch the operation immediately.",
                 () => true,
                 LaunchEconomicWarfare);
+
+            starter.AddPlayerLine(
+                "sa_economic_cancel",
+                "sa_economic_choice",
+                "hero_main_options",
+                "{=SA_EconomicCancel}Perhaps we should reconsider this approach.",
+                () => true,
+                null);
 
             // --- SPY OPERATIONS ---
             starter.AddPlayerLine(
@@ -367,10 +391,26 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_spy_target",
                 "sa_spy_target",
+                "sa_spy_choice",
+                "{=SA_SpyTarget}Information is indeed the greatest weapon. What is our target?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_spy_proceed",
+                "sa_spy_choice",
                 "hero_main_options",
-                "{=SA_SpyTarget}Information is indeed the greatest weapon.",
+                "{=SA_SpyProceed}Begin surveillance operations.",
                 () => true,
                 LaunchSpyOperation);
+
+            starter.AddPlayerLine(
+                "sa_spy_cancel",
+                "sa_spy_choice",
+                "hero_main_options",
+                "{=SA_SpyCancel}Let us wait for a better opportunity.",
+                () => true,
+                null);
 
             // --- JOINT CAMPAIGNS ---
             starter.AddPlayerLine(
@@ -385,12 +425,30 @@ namespace SecretAlliances
             starter.AddDialogLine(
                 "sa_campaign_target",
                 "sa_campaign_target",
+                "sa_campaign_choice",
+                "{=SA_CampaignTarget}Our combined forces shall be unstoppable. Which target shall we select?",
+                () => true,
+                null);
+
+            starter.AddPlayerLine(
+                "sa_campaign_proceed",
+                "sa_campaign_choice",
                 "hero_main_options",
-                "{=SA_CampaignTarget}Our combined forces shall be unstoppable.",
+                "{=SA_CampaignProceed}Coordinate our armies for the assault.",
                 () => true,
                 LaunchJointCampaign);
+
+            starter.AddPlayerLine(
+                "sa_campaign_cancel",
+                "sa_campaign_choice",
+                "hero_main_options",
+                "{=SA_CampaignCancel}We should wait for better timing.",
+                () => true,
+                null);
         }
 
+
+        private bool _lastUpgradeResult = false;
 
         // Conversation condition methods
         private bool CanOfferSecretAlliance()
@@ -593,6 +651,9 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero?.Clan != null)
             {
+                // Set the rejection flag so player can try bribe option
+                _allianceRejected = true;
+
                 // Provide helpful feedback to the player about why the alliance was rejected
                 string feedbackMessage = GenerateRejectionFeedback(targetHero.Clan, _currentAllianceEvaluationScore);
                 InformationManager.DisplayMessage(new InformationMessage(feedbackMessage, Colors.Red));
@@ -601,7 +662,7 @@ namespace SecretAlliances
                 AllianceUIHelper.DebugLog($"Alliance rejected by {targetHero.Clan.Name}: {feedbackMessage}");
             }
 
-            ResetConversationState();
+            // Don't reset conversation state here - let player try other options
         }
 
         private string GenerateRejectionFeedback(Clan targetClan, int score)
@@ -665,6 +726,8 @@ namespace SecretAlliances
             _currentBribeReceptivity = 0;
             _currentBribeAmount = 0;
             _lastPactResult = false;
+            _allianceRejected = false;
+            _lastUpgradeResult = false;
         }
 
         private void AcceptBribe()
