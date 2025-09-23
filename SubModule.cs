@@ -314,7 +314,7 @@ namespace SecretAlliances
             // --- DISSOLUTION ---
             starter.AddDialogLine(
                 "sa_dissolve_confirm",
-                "sa_dissolve_confirm",
+                "sa_dissolve_confirm",  // comes from sa_dissolve_alliance
                 "sa_dissolve_final",
                 "{=SA_DissolveConfirm}If that is your wish...",
                 () => true,
@@ -374,7 +374,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_economic_target",
-                "sa_economic_target",
+                "sa_economic_target",  // comes from sa_economic_warfare
                 "hero_main_options",
                 "{=SA_EconomicTarget}Yes, coordinated economic pressure will serve us well.",
                 () => true,
@@ -392,7 +392,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_spy_target",
-                "sa_spy_target",
+                "sa_spy_target",  // comes from sa_spy_operations
                 "hero_main_options",
                 "{=SA_SpyTarget}Information is indeed the greatest weapon.",
                 () => true,
@@ -410,7 +410,7 @@ namespace SecretAlliances
 
             starter.AddDialogLine(
                 "sa_campaign_target",
-                "sa_campaign_target",
+                "sa_campaign_target",  // comes from sa_joint_campaign
                 "hero_main_options",
                 "{=SA_CampaignTarget}Our combined forces shall be unstoppable.",
                 () => true,
@@ -557,7 +557,6 @@ namespace SecretAlliances
 
         private void SetBribeAmount(int amount)
         {
-            // AFTER
             _currentBribeAmount = amount;
         }
 
@@ -583,11 +582,9 @@ namespace SecretAlliances
             var targetHero = Hero.OneToOneConversationHero;
             if (targetHero == null) return false;
 
-            // AFTER: Use our private fields directly
+            // Use our private fields directly
             int amount = _currentBribeAmount;
             int receptivity = _currentBribeReceptivity;
-
-
 
             // Calculate acceptance based on amount and receptivity
             int acceptanceThreshold = 100 - receptivity;
