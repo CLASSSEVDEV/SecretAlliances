@@ -85,6 +85,9 @@ namespace SecretAlliances
             
             // Initialize economic warfare system
             var economicWarfareManager = new EconomicWarfareManager(_allianceService, diplomacyManager);
+            
+            // Initialize espionage system
+            var espionageManager = new EspionageManager(_allianceService, diplomacyManager, leakBehavior);
 
             // Add new behaviors
             campaignStarter.AddBehavior(_allianceService);
@@ -94,12 +97,13 @@ namespace SecretAlliances
             campaignStarter.AddBehavior(aiDecisionBehavior);
             campaignStarter.AddBehavior(diplomacyManager);
             campaignStarter.AddBehavior(economicWarfareManager);
+            campaignStarter.AddBehavior(espionageManager);
 
             // Keep legacy behavior for compatibility (but with fixes applied)
             _legacyBehavior = new SecretAllianceBehavior();
             campaignStarter.AddBehavior(_legacyBehavior);
 
-            Debug.Print("[SecretAlliances] New architecture behaviors initialized with advanced diplomacy and economic warfare systems");
+            Debug.Print("[SecretAlliances] Advanced systems initialized: Diplomacy, Economic Warfare, and Espionage");
         }
 
         private void RegisterConsoleCommands()
