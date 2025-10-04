@@ -77,8 +77,8 @@ namespace SecretAlliances
             // Initialize leak behavior
             var leakBehavior = new LeakBehavior(_allianceService);
             
-            // Initialize AI decision behavior
-            var aiDecisionBehavior = new AiDecisionBehavior(_allianceService, _requestsBehavior);
+            // Initialize AI decision behavior (needs all three dependencies)
+            var aiDecisionBehavior = new AiDecisionBehavior(_allianceService, _requestsBehavior, leakBehavior);
 
             // Add new behaviors
             campaignStarter.AddBehavior(_allianceService);
