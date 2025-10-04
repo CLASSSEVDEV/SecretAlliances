@@ -4,7 +4,7 @@ using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.Library;
 using TaleWorlds.ScreenSystem;
 
-namespace SecretAlliances.UI
+namespace SecretAlliances
 {
     public static class SecretAlliancesUI
     {
@@ -43,24 +43,33 @@ namespace SecretAlliances.UI
 
         private static ViewModel CreateAllianceManagerVM()
         {
-            var asm = typeof(SecretAlliances.SubModule).Assembly;
-            var type = asm.GetTypes().FirstOrDefault(t => t.FullName == "SecretAlliances.ViewModels.AllianceManagerVM");
-            if (type == null)
-                throw new InvalidOperationException("AllianceManagerVM type not found in SecretAlliances.ViewModels.");
+            try
+            {
+                // Get the required behaviors from the campaign
+                var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+                if (campaign == null)
+                {
+                    throw new InvalidOperationException("No active campaign found.");
+                }
 
-            var ctor = type.GetConstructor(Type.EmptyTypes);
-            if (ctor != null) return (ViewModel)ctor.Invoke(null);
+                // Find the behaviors we need
+                var allianceService = campaign.GetCampaignBehavior<SecretAlliances.Behaviors.AllianceService>();
+                var requestsBehavior = campaign.GetCampaignBehavior<SecretAlliances.Behaviors.RequestsBehavior>();
+                var leakBehavior = campaign.GetCampaignBehavior<SecretAlliances.Behaviors.LeakBehavior>();
 
-            var actionCtor = type.GetConstructor(new[] { typeof(Action) });
-            if (actionCtor != null) return (ViewModel)actionCtor.Invoke(new object[] { new Action(Close) });
+                if (allianceService == null || requestsBehavior == null || leakBehavior == null)
+                {
+                    throw new InvalidOperationException("Required behaviors not found. Make sure the mod is properly initialized.");
+                }
 
-            var anyCtor = type.GetConstructors().OrderBy(c => c.GetParameters().Length).First();
-            var parms = anyCtor.GetParameters();
-            var args = new object[parms.Length];
-            for (int i = 0; i < parms.Length; i++)
-                args[i] = parms[i].HasDefaultValue ? parms[i].DefaultValue : (parms[i].ParameterType.IsValueType ? Activator.CreateInstance(parms[i].ParameterType) : null);
-
-            return (ViewModel)anyCtor.Invoke(args);
+                // Create the ViewModel with dependencies
+                return new SecretAlliances.ViewModels.AllianceManagerVM(allianceService, requestsBehavior, leakBehavior);
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error opening Alliance Manager: {ex.Message}", Colors.Red));
+                throw;
+            }
         }
     }
 }

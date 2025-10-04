@@ -73,11 +73,19 @@ namespace SecretAlliances
             _allianceService = new AllianceService();
             _requestsBehavior = new RequestsBehavior(_allianceService);
             _preBattleAssistBehavior = new PreBattleAssistBehavior(_allianceService, _requestsBehavior);
+            
+            // Initialize leak behavior
+            var leakBehavior = new LeakBehavior(_allianceService);
+            
+            // Initialize AI decision behavior
+            var aiDecisionBehavior = new AiDecisionBehavior(_allianceService, _requestsBehavior);
 
             // Add new behaviors
             campaignStarter.AddBehavior(_allianceService);
             campaignStarter.AddBehavior(_requestsBehavior);
             campaignStarter.AddBehavior(_preBattleAssistBehavior);
+            campaignStarter.AddBehavior(leakBehavior);
+            campaignStarter.AddBehavior(aiDecisionBehavior);
 
             // Keep legacy behavior for compatibility (but with fixes applied)
             _legacyBehavior = new SecretAllianceBehavior();

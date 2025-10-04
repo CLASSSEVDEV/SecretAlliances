@@ -1,7 +1,7 @@
 ﻿using Bannerlord.UIExtenderEx.Attributes;
 using Bannerlord.UIExtenderEx.Prefabs2;
 
-namespace SecretAlliances.UIExt
+namespace SecretAlliances
 {
     // 1) Try to append a button to an element with Id="Tabs"
     [PrefabExtension("ClanScreen", "descendant::*[@Id='Tabs']/Children")]
