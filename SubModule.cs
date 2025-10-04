@@ -73,17 +73,37 @@ namespace SecretAlliances
             _allianceService = new AllianceService();
             _requestsBehavior = new RequestsBehavior(_allianceService);
             _preBattleAssistBehavior = new PreBattleAssistBehavior(_allianceService, _requestsBehavior);
+            
+            // Initialize leak behavior
+            var leakBehavior = new LeakBehavior(_allianceService);
+            
+            // Initialize AI decision behavior (needs all three dependencies)
+            var aiDecisionBehavior = new AiDecisionBehavior(_allianceService, _requestsBehavior, leakBehavior);
+
+            // Initialize advanced diplomacy system
+            var diplomacyManager = new DiplomacyManager(_allianceService);
+            
+            // Initialize economic warfare system
+            var economicWarfareManager = new EconomicWarfareManager(_allianceService, diplomacyManager);
+            
+            // Initialize espionage system
+            var espionageManager = new EspionageManager(_allianceService, diplomacyManager, leakBehavior);
 
             // Add new behaviors
             campaignStarter.AddBehavior(_allianceService);
             campaignStarter.AddBehavior(_requestsBehavior);
             campaignStarter.AddBehavior(_preBattleAssistBehavior);
+            campaignStarter.AddBehavior(leakBehavior);
+            campaignStarter.AddBehavior(aiDecisionBehavior);
+            campaignStarter.AddBehavior(diplomacyManager);
+            campaignStarter.AddBehavior(economicWarfareManager);
+            campaignStarter.AddBehavior(espionageManager);
 
             // Keep legacy behavior for compatibility (but with fixes applied)
             _legacyBehavior = new SecretAllianceBehavior();
             campaignStarter.AddBehavior(_legacyBehavior);
 
-            Debug.Print("[SecretAlliances] New architecture behaviors initialized");
+            Debug.Print("[SecretAlliances] Advanced systems initialized: Diplomacy, Economic Warfare, and Espionage");
         }
 
         private void RegisterConsoleCommands()
