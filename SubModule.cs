@@ -80,18 +80,26 @@ namespace SecretAlliances
             // Initialize AI decision behavior (needs all three dependencies)
             var aiDecisionBehavior = new AiDecisionBehavior(_allianceService, _requestsBehavior, leakBehavior);
 
+            // Initialize advanced diplomacy system
+            var diplomacyManager = new DiplomacyManager(_allianceService);
+            
+            // Initialize economic warfare system
+            var economicWarfareManager = new EconomicWarfareManager(_allianceService, diplomacyManager);
+
             // Add new behaviors
             campaignStarter.AddBehavior(_allianceService);
             campaignStarter.AddBehavior(_requestsBehavior);
             campaignStarter.AddBehavior(_preBattleAssistBehavior);
             campaignStarter.AddBehavior(leakBehavior);
             campaignStarter.AddBehavior(aiDecisionBehavior);
+            campaignStarter.AddBehavior(diplomacyManager);
+            campaignStarter.AddBehavior(economicWarfareManager);
 
             // Keep legacy behavior for compatibility (but with fixes applied)
             _legacyBehavior = new SecretAllianceBehavior();
             campaignStarter.AddBehavior(_legacyBehavior);
 
-            Debug.Print("[SecretAlliances] New architecture behaviors initialized");
+            Debug.Print("[SecretAlliances] New architecture behaviors initialized with advanced diplomacy and economic warfare systems");
         }
 
         private void RegisterConsoleCommands()
