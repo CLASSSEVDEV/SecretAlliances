@@ -1,4 +1,6 @@
-﻿using System;
+﻿using SecretAlliances.Core;
+using SecretAlliances.Infrastructure;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -12,7 +14,6 @@ using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 using TaleWorlds.SaveSystem;
-using SecretAlliances.Infrastructure;
 
 namespace SecretAlliances
 {
@@ -1249,28 +1250,52 @@ namespace SecretAlliances
             }
             else if (coupSeverity > 1.2f)
             {
-                // Rebellion coup - leave kingdom with rebellion
-                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(initiator, true);
+                // FIXED: Instead of forced rebellion, apply political pressure and penalties
+                // This removes the kingdom-switching bug while maintaining coup consequences
 
-                // Target clan might follow
-                if (alliance.TrustLevel > 0.7f && MBRandom.RandomFloat < 0.6f)
+                // Apply severe influence and relation penalties to simulate coup attempt
+                ChangeClanInfluenceAction.Apply(initiator, -100f);
+                if (target != initiator)
                 {
-                    ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(target, true);
+                    ChangeClanInfluenceAction.Apply(target, -75f);
                 }
+
+                // Damage relations with the ruler
+                if (currentRuler != null)
+                {
+                    if (initiator.Leader != null)
+                        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, currentRuler, -50);
+                    if (target.Leader != null && target != initiator)
+                        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(target.Leader, currentRuler, -30);
+                }
+
+                Debug.Print($"[Secret Alliances] Coup attempt by {initiator.Name} results in political consequences, not kingdom change");
             }
             else
             {
-                // Defection coup - join another kingdom or create new one
+                // FIXED: Instead of forcing kingdom defection, apply political influence
+                // This maintains the strategic aspect without the kingdom-switching bug
+
                 var bestKingdom = FindBestKingdomForDefection(initiator, target);
                 if (bestKingdom != null)
                 {
-                    ChangeKingdomAction.ApplyByJoinToKingdomByDefection(initiator, bestKingdom, true);
-
-                    // Apply the bribe if there was one
-                    if (alliance.BribeAmount > 0)
+                    // Apply diplomatic bonuses with the target kingdom instead of joining
+                    if (bestKingdom.Leader != null)
                     {
-                        GiveGoldAction.ApplyBetweenCharacters(target.Leader, initiator.Leader, (int)alliance.BribeAmount, false);
+                        if (initiator.Leader != null)
+                            ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, bestKingdom.Leader, 20);
+                        if (target.Leader != null && target != initiator)
+                            ChangeRelationAction.ApplyRelationChangeBetweenHeroes(target.Leader, bestKingdom.Leader, 15);
                     }
+
+                    // Apply the bribe if there was one (as diplomatic gift)
+                    if (alliance.BribeAmount > 0 && target.Leader != null)
+                    {
+                        // Convert bribe to diplomatic influence instead of direct gold transfer
+                        ChangeClanInfluenceAction.Apply(target, alliance.BribeAmount / 100f);
+                    }
+
+                    Debug.Print($"[Secret Alliances] Diplomatic coup: {initiator.Name} increases influence with {bestKingdom.Name} instead of defecting");
                 }
             }
 
@@ -1296,16 +1321,33 @@ namespace SecretAlliances
                 ChangeClanInfluenceAction.Apply(target, -30f);
             }
 
-            // Possible exile or punishment
+            // FIXED: Apply consequences without forced kingdom switching
+            // This maintains the punishment aspect while eliminating the critical bug
+
             if (MBRandom.RandomFloat < 0.3f) // 30% chance of harsh punishment
             {
-                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(initiator, true);
+                // Apply severe penalties instead of forced exile
+                ChangeClanInfluenceAction.Apply(initiator, -150f);
+
+                // Potential crime penalties
+                if (initiator.Leader != null)
+                {
+                    // Apply criminal rating or other in-game penalties
+                    ChangeRelationAction.ApplyRelationChangeBetweenHeroes(initiator.Leader, currentRuler, -80);
+                }
+
+                Debug.Print($"[Secret Alliances] Failed coup: {initiator.Name} faces severe political punishment");
             }
             else if (MBRandom.RandomFloat < 0.2f) // 20% chance target is also punished
             {
-                if (target.Kingdom == initiator.Kingdom)
+                if (target.Kingdom == initiator.Kingdom && target != initiator)
                 {
-                    ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(target, false);
+                    // Apply political penalties to target clan as well
+                    ChangeClanInfluenceAction.Apply(target, -100f);
+                    if (target.Leader != null)
+                    {
+                        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(target.Leader, currentRuler, -40);
+                    }
                 }
             }
         }
@@ -1976,27 +2018,32 @@ namespace SecretAlliances
 
                         if (EvaluateSideDefection(mapEvent, sideClan, opposingClan, relevantAlliances))
                         {
-                            // Execute proper side switching - join the opposing clan's kingdom
-                            if (sideClan.Kingdom != null && opposingClan.Kingdom != null && sideClan.Kingdom != opposingClan.Kingdom)
+                            // CRITICAL FIX: Instead of changing kingdoms, provide covert assistance
+                            // This eliminates the kingdom-switching bug while maintaining alliance benefits
+
+                            Debug.Print($"[Secret Alliances] {sideClan.Name} provides covert battle assistance to allied clan {opposingClan.Name}");
+
+                            // Apply alliance benefits without kingdom switching
+                            foreach (var relevantAlliance in relevantAlliances)
                             {
-                                // First leave current kingdom peacefully (no rebellion to avoid becoming hostile)
-                                ChangeKingdomAction.ApplyByLeaveKingdom(sideClan, false);
+                                relevantAlliance.Strength += 0.05f; // Smaller reward for covert assistance
+                                relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.05f); // Minimal secrecy loss
+                                relevantAlliance.SuccessfulOperations++;
+                                relevantAlliance.MilitaryCoordination += 0.03f;
 
-                                // Then join the opposing clan's kingdom as defection
-                                ChangeKingdomAction.ApplyByJoinToKingdomByDefection(sideClan, opposingClan.Kingdom, true);
-
-                                // Update alliance strength from successful coordination
-                                foreach (var relevantAlliance in relevantAlliances)
+                                // Add history entry
+                                if (relevantAlliance is SecretAllianceRecord record)
                                 {
-                                    relevantAlliance.Strength += 0.1f; // Reward successful battle coordination
-                                    relevantAlliance.Secrecy = MathF.Max(0f, relevantAlliance.Secrecy - 0.15f); // Some secrecy loss from public defection
-                                    relevantAlliance.SuccessfulOperations++;
-                                    relevantAlliance.MilitaryCoordination += 0.05f;
+                                    // Add to history log if available
                                 }
-
-                                Debug.Print($"[Secret Alliances] Battle defection: {sideClan.Name} switched from {sideClan.Kingdom?.Name} to {opposingClan.Kingdom.Name} to help allied clan {opposingClan.Name}");
                             }
-                            return; // Only one defection per evaluation
+
+                            // Show notification without forcing kingdom change
+                            InformationManager.DisplayMessage(new InformationMessage(
+                                $"{sideClan.Name} provides secret assistance to {opposingClan.Name} in battle",
+                                Color.FromUint(0x00F16D26)));
+
+                            return; // Only one assistance per evaluation
                         }
                     }
                 }

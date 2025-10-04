@@ -1,0 +1,181 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<Prefab>
+	<Window DoNotAcceptEvents="true" DoNotPassEventsToChildren="false">
+		<Widget DoNotAcceptEvents="false" WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent">
+			<!-- Outer layout -->
+			<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+					   LayoutImp.LayoutMethod="VerticalBottomToTop" MarginTop="20" MarginLeft="20" MarginRight="20" MarginBottom="20">
+
+				<!-- Header: Title + Status -->
+				<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+						   LayoutImp.LayoutMethod="HorizontalLeftToRight">
+					<TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren"
+								Text="@ClanName Secret Alliances" />
+					<TextWidget WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren"
+								Text="@StatusMessage" HorizontalAlignment="Right" MarginLeft="20" />
+				</ListPanel>
+
+				<!-- Stats row -->
+				<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+						   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="10">
+					<TextWidget Text="Alliances: @TotalAlliances" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+					<TextWidget Text="Requests: @TotalRequests" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="20" />
+					<TextWidget Text="Exposure: @OverallExposureScore%" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="20" />
+				</ListPanel>
+
+				<!-- Action row -->
+				<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+						   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="12">
+					<ButtonWidget DoNotAcceptEvents="false" Command.Click="ExecuteCreateAlliance"
+								  IsEnabled="@CanCreateAlliance" WidthSizePolicy="Fixed" SuggestedWidth="150"
+								  HeightSizePolicy="Fixed" SuggestedHeight="30">
+						<TextWidget Text="Create Alliance" />
+					</ButtonWidget>
+
+					<ButtonWidget DoNotAcceptEvents="false" Command.Click="ExecuteRefresh"
+								  WidthSizePolicy="Fixed" SuggestedWidth="100" HeightSizePolicy="Fixed"
+								  SuggestedHeight="30" MarginLeft="10">
+						<TextWidget Text="Refresh" />
+					</ButtonWidget>
+				</ListPanel>
+
+				<!-- Content row: two columns -->
+				<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+						   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="14">
+
+					<!-- Left column: My Alliances -->
+					<Widget WidthSizePolicy="Fixed" SuggestedWidth="600" HeightSizePolicy="StretchToParent">
+						<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+								   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+							<TextWidget Text="My Alliances" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+
+							<ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="8" AutoHideScrollBarHandle="true">
+								<ListPanel DataSource="{MyAlliances}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+										   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+									<!-- Alliance item -->
+									<Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="40" MarginBottom="6">
+										<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+												   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+											<!-- Name + status -->
+											<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+													   LayoutImp.LayoutMethod="HorizontalLeftToRight">
+												<TextWidget Text="@Name" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+												<TextWidget Text="@StatusDescription" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+											</ListPanel>
+
+											<!-- Stats -->
+											<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+													   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="4">
+												<TextWidget Text="Members: @MemberCount" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+												<TextWidget Text="Trust: @TrustLevel%" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+												<TextWidget Text="Secrecy: @SecrecyLevel%" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+											</ListPanel>
+
+											<!-- Actions -->
+											<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+													   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="4">
+												<ButtonWidget Command.Click="ExecuteViewDetails" WidthSizePolicy="Fixed" SuggestedWidth="80"
+															  HeightSizePolicy="Fixed" SuggestedHeight="25">
+													<TextWidget Text="Details" />
+												</ButtonWidget>
+
+												<ButtonWidget Command.Click="ExecuteLeaveAlliance" IsVisible="@IsNotLeader"
+															  WidthSizePolicy="Fixed" SuggestedWidth="80" HeightSizePolicy="Fixed"
+															  SuggestedHeight="25" MarginLeft="6">
+													<TextWidget Text="Leave" />
+												</ButtonWidget>
+											</ListPanel>
+
+										</ListPanel>
+									</Widget>
+								</ListPanel>
+							</ScrollablePanel>
+						</ListPanel>
+					</Widget>
+
+					<!-- Right column: Requests -->
+					<Widget WidthSizePolicy="Fixed" SuggestedWidth="600" HeightSizePolicy="StretchToParent" MarginLeft="20">
+						<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+								   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+							<!-- Pending -->
+							<Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="300">
+								<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+										   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+									<TextWidget Text="Pending Requests" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+
+									<ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="8" AutoHideScrollBarHandle="true">
+										<ListPanel DataSource="{PendingRequests}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+												   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+											<Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="35" MarginBottom="6">
+												<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+														   LayoutImp.LayoutMethod="VerticalLeftToRight">
+
+													<TextWidget Text="@TypeDescription" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+													<TextWidget Text="@RequesterName" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+
+													<!-- Description -->
+													<TextWidget Text="@Description" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" MarginTop="4" />
+
+													<!-- Stats + actions -->
+													<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+															   LayoutImp.LayoutMethod="HorizontalLeftToRight" MarginTop="4">
+														<TextWidget Text="Reward: @Reward" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+														<TextWidget Text="Risk: @RiskLevel%" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+
+														<ButtonWidget Command.Click="ExecuteAccept" IsEnabled="@CanAccept"
+																	  WidthSizePolicy="Fixed" SuggestedWidth="70" HeightSizePolicy="Fixed"
+																	  SuggestedHeight="22" MarginLeft="12">
+															<TextWidget Text="Accept" />
+														</ButtonWidget>
+
+														<ButtonWidget Command.Click="ExecuteDecline" IsEnabled="@CanDecline"
+																	  WidthSizePolicy="Fixed" SuggestedWidth="70" HeightSizePolicy="Fixed"
+																	  SuggestedHeight="22" MarginLeft="6">
+															<TextWidget Text="Decline" />
+														</ButtonWidget>
+													</ListPanel>
+												</ListPanel>
+											</Widget>
+										</ListPanel>
+									</ScrollablePanel>
+								</ListPanel>
+							</Widget>
+
+							<!-- Sent -->
+							<Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="300" MarginTop="14">
+								<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+										   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+									<TextWidget Text="Sent Requests" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren" />
+
+									<ScrollablePanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" MarginTop="8" AutoHideScrollBarHandle="true">
+										<ListPanel DataSource="{SentRequests}" WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+												   LayoutImp.LayoutMethod="VerticalBottomToTop">
+
+											<Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="Fixed" SuggestedHeight="30" MarginBottom="6">
+												<ListPanel WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
+														   LayoutImp.LayoutMethod="HorizontalLeftToRight">
+													<TextWidget Text="@TypeDescription" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" />
+													<TextWidget Text="@TargetName" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+													<TextWidget Text="@StatusDescription" WidthSizePolicy="CoverChildren" HeightSizePolicy="CoverChildren" MarginLeft="12" />
+												</ListPanel>
+											</Widget>
+										</ListPanel>
+									</ScrollablePanel>
+								</ListPanel>
+							</Widget>
+
+						</ListPanel>
+					</Widget>
+				</ListPanel>
+
+			</ListPanel>
+		</Widget>
+	</Window>
+</Prefab>

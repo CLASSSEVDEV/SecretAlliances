@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Linq;
+using SecretAlliances.Core;
+using SecretAlliances.UI;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 
-namespace SecretAlliances
+namespace SecretAlliances.Main
 {
     public static class ConsoleCommands
     {
@@ -13,6 +15,7 @@ namespace SecretAlliances
         {
             // Commands would be registered here if TaleWorlds had a public command registration system
             // For now, these methods can be called through other means or mod integrations
+
         }
 
         private static void DumpAlliances(string[] args)

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using SecretAlliances.Core;
+using SecretAlliances.Main;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,7 +9,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 
-namespace SecretAlliances
+namespace SecretAlliances.UI
 {
     /// <summary>
     /// Helper class for displaying secret alliance information and debug data
